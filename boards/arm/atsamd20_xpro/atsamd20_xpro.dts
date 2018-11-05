@@ -75,3 +75,7 @@
 #endif
 	};
 };
+
+&rtc {
+	status = "ok";
+};
