@@ -1,16 +1,25 @@
+#
+# Copyright (c) 2018 Linaro Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+#
 ---
-title: RISCV QEMU UART
+title: SIFIVE UART
 version: 0.1
 
 description: >
-    This binding gives a base representation of the RISCV QEMU UART
+    This binding gives a base representation of the SIFIVE UART
 
 inherits:
     !include uart.yaml
 
 properties:
     compatible:
-      constraint: "riscv,qemu-uart"
+      type: string
+      category: required
+      description: compatible strings
+      constraint: "microsemi,coreuart"
+      generation: define
 
     reg:
       type: array
@@ -23,4 +32,5 @@ properties:
       category: required
       description: required interrupts
       generation: define
+
 ...

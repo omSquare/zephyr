@@ -387,16 +387,24 @@ def extract_property(node_compat, yaml, node_address, prop, prop_val, names):
         pinctrl.extract(node_address, yaml, prop, def_label)
     elif 'clocks' in prop:
         clocks.extract(node_address, yaml, prop, def_label)
-    elif 'gpios' in prop:
+    elif 'pwms' in prop or 'gpios' in prop:
+        # drop the 's' from the prop
+        generic = prop[:-1]
         try:
             prop_values = list(reduced[node_address]['props'].get(prop))
         except:
             prop_values = reduced[node_address]['props'].get(prop)
 
+        # Newer versions of dtc might have the property look like
+        # cs-gpios = <0x05 0x0d 0x00>, < 0x06 0x00 0x00>;
+        # So we need to flatten the list in that case
+        if isinstance(prop_values[0], list):
+            prop_values = [item for sublist in prop_values for item in sublist]
+
         extract_controller(node_address, yaml, prop, prop_values, 0,
-                           def_label, 'gpio')
+                           def_label, generic)
         extract_cells(node_address, yaml, prop, prop_values,
-                      names, 0, def_label, 'gpio')
+                      names, 0, def_label, generic)
     else:
         default.extract(node_address, yaml, prop, prop_val['type'], def_label)
 
