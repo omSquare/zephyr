@@ -19,7 +19,6 @@
 
 #else
 
-#define DROP_MAX 0
 #define DROP_MSG NULL
 #define DROP_MSG_LEN 0
 
