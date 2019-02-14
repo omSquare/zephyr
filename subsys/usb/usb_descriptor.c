@@ -175,7 +175,7 @@ static void ascii7_to_utf16le(void *descriptor)
 		__ASSERT(buf[ascii_idx_max] > 0x1F && buf[ascii_idx_max] < 0x7F,
 			 "Only printable ascii-7 characters are allowed in USB "
 			 "string descriptors");
-		buf[i] = 0;
+		buf[i] = 0U;
 		buf[i - 1] = buf[ascii_idx_max--];
 	}
 }
@@ -337,8 +337,8 @@ static int usb_fix_descriptor(struct usb_desc_header *head)
 	struct usb_if_descriptor *if_descr = NULL;
 	struct usb_cfg_data *cfg_data = NULL;
 	struct usb_ep_descriptor *ep_descr = NULL;
-	u8_t numof_ifaces = 0;
-	u8_t str_descr_idx = 0;
+	u8_t numof_ifaces = 0U;
+	u8_t str_descr_idx = 0U;
 	u32_t requested_ep = BIT(16) | BIT(0);
 
 	while (head->bLength != 0) {
@@ -367,7 +367,7 @@ static int usb_fix_descriptor(struct usb_desc_header *head)
 				}
 
 				if (cfg_data->interface_config) {
-					cfg_data->interface_config(
+					cfg_data->interface_config(head,
 							numof_ifaces);
 				}
 			}
@@ -409,9 +409,8 @@ static int usb_fix_descriptor(struct usb_desc_header *head)
 
 				LOG_DBG("Now the wTotalLength is %d",
 					(u8_t *)head - (u8_t *)cfg_descr);
-				cfg_descr->wTotalLength =
-					sys_cpu_to_le16((u8_t *)head -
-							(u8_t *)cfg_descr);
+				sys_put_le16((u8_t *)head - (u8_t *)cfg_descr,
+					     (u8_t *)&cfg_descr->wTotalLength);
 				cfg_descr->bNumInterfaces = numof_ifaces;
 			}
 
@@ -446,4 +445,65 @@ u8_t *usb_get_device_descriptor(void)
 	}
 
 	return (u8_t *) __usb_descriptor_start;
+}
+
+struct usb_dev_data *usb_get_dev_data_by_cfg(sys_slist_t *list,
+					     struct usb_cfg_data *cfg)
+{
+	struct usb_dev_data *dev_data;
+
+	SYS_SLIST_FOR_EACH_CONTAINER(list, dev_data, node) {
+		struct device *dev = dev_data->dev;
+		const struct usb_cfg_data *cfg_cur = dev->config->config_info;
+
+		if (cfg_cur == cfg) {
+			return dev_data;
+		}
+	}
+
+	LOG_DBG("Device data not found for cfg %p", cfg);
+
+	return NULL;
+}
+
+struct usb_dev_data *usb_get_dev_data_by_iface(sys_slist_t *list,
+					       u8_t iface_num)
+{
+	struct usb_dev_data *dev_data;
+
+	SYS_SLIST_FOR_EACH_CONTAINER(list, dev_data, node) {
+		struct device *dev = dev_data->dev;
+		const struct usb_cfg_data *cfg = dev->config->config_info;
+		const struct usb_if_descriptor *if_desc =
+						cfg->interface_descriptor;
+
+		if (if_desc->bInterfaceNumber == iface_num) {
+			return dev_data;
+		}
+	}
+
+	LOG_DBG("Device data not found for iface number %u", iface_num);
+
+	return NULL;
+}
+
+struct usb_dev_data *usb_get_dev_data_by_ep(sys_slist_t *list, u8_t ep)
+{
+	struct usb_dev_data *dev_data;
+
+	SYS_SLIST_FOR_EACH_CONTAINER(list, dev_data, node) {
+		struct device *dev = dev_data->dev;
+		const struct usb_cfg_data *cfg = dev->config->config_info;
+		const struct usb_ep_cfg_data *ep_data = cfg->endpoint;
+
+		for (u8_t i = 0; i < cfg->num_endpoints; i++) {
+			if (ep_data[i].ep_addr == ep) {
+				return dev_data;
+			}
+		}
+	}
+
+	LOG_DBG("Device data not found for ep %u", ep);
+
+	return NULL;
 }

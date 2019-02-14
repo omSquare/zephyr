@@ -45,13 +45,13 @@ SECTION_FUNC(TEXT, __pendsv)
 
 #ifdef CONFIG_TRACING
     /* Register the context switch */
-    push {lr}
+    push {r0, lr}
     bl z_sys_trace_thread_switched_out
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
-    pop {r0}
-    mov lr, r0
+    pop {r0, r1}
+    mov lr, r1
 #else
-    pop {lr}
+    pop {r0, lr}
 #endif /* CONFIG_ARMV6_M_ARMV8_M_BASELINE */
 #endif /* CONFIG_TRACING */
 
@@ -182,13 +182,14 @@ _thread_irq_disabled:
     vldmia r0, {s16-s31}
 #endif
 
-#ifdef CONFIG_MPU_STACK_GUARD
-    /* r2 contains k_thread */
-    add r0, r2, #0
-    push {r2, lr}
-    blx configure_mpu_stack_guard
-    pop {r2, lr}
-#endif /* CONFIG_MPU_STACK_GUARD */
+#if defined (CONFIG_ARM_MPU)
+    /* Re-program dynamic memory map */
+    push {r2,lr}
+    ldr r0, =_kernel
+    ldr r0, [r0, #_kernel_offset_to_current]
+    bl _arch_configure_dynamic_mpu_regions
+    pop {r2,lr}
+#endif
 
 #ifdef CONFIG_USERSPACE
     /* restore mode */
@@ -204,16 +205,6 @@ _thread_irq_disabled:
      */
     isb
 
-    /* r2 contains k_thread */
-    add r0, r2, #0
-    push {r2, lr}
-    blx configure_mpu_mem_domain
-    pop {r2, lr}
-
-    add r0, r2, #0
-    push {r2, lr}
-    blx configure_mpu_user_context
-    pop {r2, lr}
 #endif
 
     /* load callee-saved + psp from thread */
@@ -225,11 +216,9 @@ _thread_irq_disabled:
 
 #ifdef CONFIG_BUILTIN_STACK_GUARD
     /* clear stack pointer limit before setting the PSP */
-    push {r3}
-    mov r3, #0
-    msr PSPLIM, r3
-    pop {r3}
-#endif
+    mov r0, #0
+    msr PSPLIM, r0
+#endif /* CONFIG_BUILTIN_STACK_GUARD */
 
     msr PSP, ip
 
@@ -242,35 +231,44 @@ _thread_irq_disabled:
 #endif /* CONFIG_BUILTIN_STACK_GUARD */
 
 #ifdef CONFIG_EXECUTION_BENCHMARKING
-    stm sp!,{r0-r3} /* Save regs r0 to r4 on stack */
-    push {lr}
+    push {r0, lr}
     bl read_timer_end_of_swap
-
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
-    pop {r3}
-    mov lr,r3
+    pop {r0, r1}
+    mov lr,r1
 #else
-    pop {lr}
+    pop {r0, lr}
 #endif /* CONFIG_ARMV6_M_ARMV8_M_BASELINE */
-    ldm sp!,{r0-r3} /* Load back regs ro to r4 */
+
 #endif /* CONFIG_EXECUTION_BENCHMARKING */
 
 #ifdef CONFIG_TRACING
     /* Register the context switch */
-    push {lr}
+    push {r0, lr}
     bl z_sys_trace_thread_switched_in
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
-    pop {r0}
-    mov lr, r0
+    pop {r0, r1}
+    mov lr, r1
 #else
-    pop {lr}
-#endif /* CONFIG_ARMV6_M_ARMV8_M_BASELINE */
+    pop {r0, lr}
+#endif
 #endif /* CONFIG_TRACING */
 
     /* exc return */
     bx lr
 
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
+
+/**
+ *
+ * @brief Service call handler
+ *
+ * The service call (svc) is used in the following occasions:
+ * - IRQ offloading
+ * - Kernel run-time exceptions
+ *
+ * @return N/A
+ */
 SECTION_FUNC(TEXT, __svc)
     /* Use EXC_RETURN state to find out if stack frame is on the
      * MSP or PSP
@@ -303,31 +301,33 @@ _stack_frame_endif:
     beq _oops
 
 #if CONFIG_IRQ_OFFLOAD
-    push {lr}
+    push {r0, lr}
     blx _irq_do_offload  /* call C routine which executes the offload */
-    pop {r3}
-    mov lr, r3
-#endif
+    pop {r0, r1}
+    mov lr, r1
+#endif /* CONFIG_IRQ_OFFLOAD */
 
     /* exception return is done in _IntExit() */
     b _IntExit
 
 _oops:
-    push {lr}
+    push {r0, lr}
     blx _do_kernel_oops
-    pop {pc}
+    pop {r0, pc}
 
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+
 /**
  *
  * @brief Service call handler
  *
- * The service call (svc) is only used in __swap() to enter handler mode so we
- * can go through the PendSV exception to perform a context switch.
+ * The service call (svc) is used in the following occasions:
+ * - IRQ offloading
+ * - Kernel run-time exceptions
+ * - System Calls (User mode)
  *
  * @return N/A
  */
-
 SECTION_FUNC(TEXT, __svc)
     tst lr, #0x4    /* did we come from thread mode ? */
     ite eq  /* if zero (equal), came from handler mode */
@@ -367,18 +367,18 @@ SECTION_FUNC(TEXT, __svc)
     beq _oops
 
 #if CONFIG_IRQ_OFFLOAD
-    push {lr}
+    push {r0, lr}
     blx _irq_do_offload  /* call C routine which executes the offload */
-    pop {lr}
+    pop {r0, lr}
 
     /* exception return is done in _IntExit() */
     b _IntExit
 #endif
 
 _oops:
-    push {lr}
+    push {r0, lr}
     blx _do_kernel_oops
-    pop {pc}
+    pop {r0, pc}
 
 #if CONFIG_USERSPACE
     /*

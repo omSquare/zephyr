@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_LEVEL CONFIG_USB_DEVICE_NETWORK_DEBUG_LEVEL
+#define LOG_LEVEL CONFIG_USB_DEVICE_NETWORK_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(usb_ecm)
+LOG_MODULE_REGISTER(usb_ecm);
 
 /* Enable verbose debug printing extra hexdumps */
 #define VERBOSE_DEBUG	0
@@ -53,7 +53,7 @@ struct usb_cdc_ecm_config {
 	struct usb_ep_descriptor if1_1_out_ep;
 } __packed;
 
-USBD_CLASS_DESCR_DEFINE(primary) struct usb_cdc_ecm_config cdc_ecm_cfg = {
+USBD_CLASS_DESCR_DEFINE(primary, 0) struct usb_cdc_ecm_config cdc_ecm_cfg = {
 #ifdef CONFIG_USB_COMPOSITE_DEVICE
 	.iad = {
 		.bLength = sizeof(struct usb_association_descriptor),
@@ -101,7 +101,7 @@ USBD_CLASS_DESCR_DEFINE(primary) struct usb_cdc_ecm_config cdc_ecm_cfg = {
 		.bDescriptorSubtype = ETHERNET_FUNC_DESC,
 		.iMACAddress = 4,
 		.bmEthernetStatistics = sys_cpu_to_le32(0), /* None */
-		.wMaxSegmentSize = sys_cpu_to_le16(1514),
+		.wMaxSegmentSize = sys_cpu_to_le16(NETUSB_MTU),
 		.wNumberMCFilters = sys_cpu_to_le16(0), /* None */
 		.bNumberPowerFilters = 0, /* No wake up */
 	},
@@ -259,15 +259,11 @@ static int ecm_send(struct net_pkt *pkt)
 	struct net_buf *frag;
 	int b_idx = 0, ret;
 
-	net_hexdump_frags("<", pkt, false);
+	net_pkt_hexdump(pkt, "<");
 
 	if (!pkt->frags) {
 		return -ENODATA;
 	}
-
-	/* copy header */
-	memcpy(&tx_buf[b_idx], net_pkt_ll(pkt), net_pkt_ll_reserve(pkt));
-	b_idx += net_pkt_ll_reserve(pkt);
 
 	/* copy payload */
 	for (frag = pkt->frags; frag; frag = frag->frags) {
@@ -307,7 +303,7 @@ static void ecm_read_cb(u8_t ep, int size, void *priv)
 		}
 	}
 
-	pkt = net_pkt_get_reserve_rx(0, K_FOREVER);
+	pkt = net_pkt_get_reserve_rx(K_FOREVER);
 	if (!pkt) {
 		LOG_ERR("no memory for network packet\n");
 		goto done;
@@ -388,6 +384,9 @@ static void ecm_status_cb(enum usb_dc_status_code status, const u8_t *param)
 		LOG_DBG("USB unhandlded state: %d", status);
 		break;
 
+	case USB_DC_SOF:
+		break;
+
 	case USB_DC_UNKNOWN:
 	default:
 		LOG_DBG("USB unknown state: %d", status);
@@ -408,9 +407,12 @@ USBD_STRING_DESCR_DEFINE(primary) struct usb_cdc_ecm_mac_descr utf16le_mac = {
 	.bString = CONFIG_USB_DEVICE_NETWORK_ECM_MAC
 };
 
-static void ecm_interface_config(u8_t bInterfaceNumber)
+static void ecm_interface_config(struct usb_desc_header *head,
+				 u8_t bInterfaceNumber)
 {
 	int idx = usb_get_str_descriptor_idx(&utf16le_mac);
+
+	ARG_UNUSED(head);
 
 	if (idx) {
 		LOG_DBG("fixup string %d", idx);

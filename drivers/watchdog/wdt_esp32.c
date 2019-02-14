@@ -13,6 +13,11 @@
 #include <watchdog.h>
 #include <device.h>
 
+enum wdt_mode {
+	WDT_MODE_RESET = 0,
+	WDT_MODE_INTERRUPT_RESET
+};
+
 struct wdt_esp32_data {
 	u32_t timeout;
 	enum wdt_mode mode;
@@ -30,7 +35,7 @@ static inline void wdt_esp32_seal(void)
 {
 	volatile u32_t *reg = (u32_t *)TIMG_WDTWPROTECT_REG(1);
 
-	*reg = 0;
+	*reg = 0U;
 }
 
 static inline void wdt_esp32_unseal(void)
@@ -71,7 +76,7 @@ static void adjust_timeout(u32_t timeout)
 	/* MWDT ticks every 12.5ns.  Set the prescaler to 40000, so the
 	 * counter for each watchdog stage is decremented every 0.5ms.
 	 */
-	 *reg = 40000;
+	 *reg = 40000U;
 
 	 reg = (u32_t *)TIMG_WDTCONFIG2_REG(1);
 	 *reg = ticks;

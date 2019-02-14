@@ -5,8 +5,8 @@
  */
 
 #include <ztest.h>
+#include "test_sched.h"
 
-#define STACK_SIZE (384 + CONFIG_TEST_EXTRA_STACKSIZE)
 /* nrf 51 has lower ram, so creating less number of threads */
 #if CONFIG_SRAM_SIZE <= 24
 	#define NUM_THREAD 2
@@ -18,7 +18,7 @@
 #endif
 #define BASE_PRIORITY 0
 #define ITRERATION_COUNT 5
-static K_THREAD_STACK_ARRAY_DEFINE(tstack, NUM_THREAD, STACK_SIZE);
+BUILD_ASSERT(NUM_THREAD <= MAX_NUM_THREAD);
 /* slice size in millisecond*/
 #define SLICE_SIZE 200
 /* busy for more than one slice*/
@@ -50,20 +50,12 @@ static void thread_tslice(void *p1, void *p2, void *p3)
 			      (tdelta <= expected_slice_max) &&
 			      ((int)p1 == thread_idx)), NULL);
 		thread_idx = (thread_idx + 1) % (NUM_THREAD);
-		u32_t t32 = k_uptime_get_32();
 
 		/* Keep the current thread busy for more than one slice,
 		 * even though, when timeslice used up the next thread
 		 * should be scheduled in.
 		 */
-		while (k_uptime_get_32() - t32 < BUSY_MS) {
-#if defined(CONFIG_ARCH_POSIX)
-			posix_halt_cpu(); /*sleep until next irq*/
-#else
-			;
-#endif
-		}
-
+		k_busy_wait(1000 * BUSY_MS);
 		k_sem_give(&sema1);
 	}
 
@@ -83,7 +75,6 @@ static void thread_tslice(void *p1, void *p2, void *p3)
  */
 void test_slice_scheduling(void)
 {
-	u32_t t32;
 	k_tid_t tid[NUM_THREAD];
 	int old_prio = k_thread_priority_get(k_current_get());
 	int count = 0;
@@ -96,7 +87,7 @@ void test_slice_scheduling(void)
 
 	/* create threads with equal preemptive priority*/
 	for (int i = 0; i < NUM_THREAD; i++) {
-		tid[i] = k_thread_create(&t[i], tstack[i], STACK_SIZE,
+		tid[i] = k_thread_create(&t[i], tstacks[i], STACK_SIZE,
 					 thread_tslice, (void *)(intptr_t) i, NULL, NULL,
 					 K_PRIO_PREEMPT(BASE_PRIORITY), 0, 0);
 	}
@@ -111,14 +102,7 @@ void test_slice_scheduling(void)
 		 * even though, when timeslice used up the next thread
 		 * should be scheduled in.
 		 */
-		t32 = k_uptime_get_32();
-		while (k_uptime_get_32() - t32 < BUSY_MS) {
-#if defined(CONFIG_ARCH_POSIX)
-			posix_halt_cpu(); /*sleep until next irq*/
-#else
-			;
-#endif
-		}
+		k_busy_wait(1000 * BUSY_MS);
 
 		/* relinquish CPU and wait for each thread to complete*/
 		for (int i = 0; i < NUM_THREAD; i++) {

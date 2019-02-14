@@ -9,8 +9,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_MODULE_NAME net_ipv4_autoconf
-#define NET_LOG_LEVEL CONFIG_NET_IPV4_AUTOCONF_LOG_LEVEL
+#include <logging/log.h>
+LOG_MODULE_REGISTER(net_ipv4_autoconf, CONFIG_NET_IPV4_AUTO_LOG_LEVEL);
 
 #include "net_private.h"
 #include <errno.h>
@@ -33,33 +33,21 @@ static struct net_pkt *ipv4_autoconf_prepare_arp(struct net_if *iface)
 {
 	struct net_if_config *cfg = net_if_get_config(iface);
 	struct net_pkt *pkt;
-	struct net_buf *frag;
 
-	pkt = net_pkt_get_reserve_tx(net_if_get_ll_reserve(iface, NULL),
-				     BUF_ALLOC_TIMEOUT);
+	/* We provide AF_UNSPEC to the allocator: this packet does not
+	 * need space for any IPv4 header.
+	 */
+	pkt = net_pkt_alloc_with_buffer(iface, sizeof(struct net_arp_hdr),
+					AF_UNSPEC, 0, BUF_ALLOC_TIMEOUT);
 	if (!pkt) {
-		goto fail;
+		return NULL;
 	}
 
-	frag = net_pkt_get_frag(pkt, BUF_ALLOC_TIMEOUT);
-	if (!frag) {
-		goto fail;
-	}
-
-	net_pkt_frag_add(pkt, frag);
-	net_pkt_set_iface(pkt, iface);
 	net_pkt_set_family(pkt, AF_INET);
 	net_pkt_set_ipv4_auto(pkt, true);
 
 	return net_arp_prepare(pkt, &cfg->ipv4auto.requested_ip,
 			       &cfg->ipv4auto.current_ip);
-
-fail:
-	if (pkt) {
-		net_pkt_unref(pkt);
-	}
-
-	return NULL;
 }
 
 static void ipv4_autoconf_send_probe(struct net_if_ipv4_autoconf *ipv4auto)
@@ -115,12 +103,9 @@ enum net_verdict net_ipv4_autoconf_input(struct net_if *iface,
 		return NET_DROP;
 	}
 
-	if (net_pkt_get_len(pkt) < (sizeof(struct net_arp_hdr) -
-				    net_pkt_ll_reserve(pkt))) {
+	if (net_pkt_get_len(pkt) < sizeof(struct net_arp_hdr)) {
 		NET_DBG("Invalid ARP header (len %zu, min %zu bytes)",
-			net_pkt_get_len(pkt),
-			sizeof(struct net_arp_hdr) -
-			net_pkt_ll_reserve(pkt));
+			net_pkt_get_len(pkt), sizeof(struct net_arp_hdr));
 		return NET_DROP;
 	}
 

@@ -43,6 +43,12 @@ extern "C" {
  */
 #define MK_ISR_NAME(x) __isr__##x
 
+#define Z_DYN_STUB_SIZE			4
+#define Z_DYN_STUB_OFFSET		0
+#define Z_DYN_STUB_LONG_JMP_EXTRA_SIZE	3
+#define Z_DYN_STUB_PER_BLOCK		32
+
+
 #ifndef _ASMLANGUAGE
 
 #ifdef CONFIG_INT_LATENCY_BENCHMARK
@@ -54,6 +60,7 @@ void _int_latency_stop(void);
 #endif
 
 /* interrupt/exception/error related definitions */
+
 
 /*
  * The TCS must be aligned to the same boundary as that used by the floating
@@ -447,6 +454,15 @@ static ALWAYS_INLINE void _arch_irq_unlock(unsigned int key)
 }
 
 /**
+ * @brief Explicitly nop operation.
+ */
+static ALWAYS_INLINE void arch_nop(void)
+{
+	__asm__ volatile("nop");
+}
+
+
+/**
  * The NANO_SOFT_IRQ macro must be used as the value for the @a irq parameter
  * to NANO_CPU_INT_REGISTER when connecting to an interrupt that does not
  * correspond to any IRQ line (such as spurious vector or SW IRQ)
@@ -591,7 +607,7 @@ extern struct task_state_segment _main_tss;
 #endif
 
 #define _ARCH_THREAD_STACK_DEFINE(sym, size) \
-	struct _k_thread_stack_element __kernel_noinit \
+	struct _k_thread_stack_element __noinit \
 		__aligned(_STACK_BASE_ALIGN) \
 		sym[ROUND_UP((size), _STACK_SIZE_ALIGN) + _STACK_GUARD_SIZE]
 
@@ -601,7 +617,7 @@ extern struct task_state_segment _main_tss;
 		_STACK_GUARD_SIZE)
 
 #define _ARCH_THREAD_STACK_ARRAY_DEFINE(sym, nmemb, size) \
-	struct _k_thread_stack_element __kernel_noinit \
+	struct _k_thread_stack_element __noinit \
 		__aligned(_STACK_BASE_ALIGN) \
 		sym[nmemb][_ARCH_THREAD_STACK_LEN(size)]
 
@@ -633,17 +649,9 @@ extern const NANO_ESF _default_esf;
 #ifdef CONFIG_X86_MMU
 /* Linker variable. It is needed to access the start of the Page directory */
 
-
-#ifdef CONFIG_X86_PAE_MODE
 extern u64_t __mmu_tables_start;
-#define X86_MMU_PDPT ((struct x86_mmu_page_directory_pointer *)\
+#define X86_MMU_PDPT ((struct x86_mmu_pdpt *)\
 		      (u32_t *)(void *)&__mmu_tables_start)
-#else
-extern u32_t __mmu_tables_start;
-#define X86_MMU_PD ((struct x86_mmu_page_directory *)\
-		    (void *)&__mmu_tables_start)
-#endif
-
 
 /**
  * @brief Fetch page table flags for a particular page

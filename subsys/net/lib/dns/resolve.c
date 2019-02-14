@@ -10,8 +10,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_MODULE_NAME net_dns_resolve
-#define NET_LOG_LEVEL CONFIG_DNS_RESOLVER_LOG_LEVEL
+#include <logging/log.h>
+LOG_MODULE_REGISTER(net_dns_resolve, CONFIG_DNS_RESOLVER_LOG_LEVEL);
 
 #include <zephyr/types.h>
 #include <string.h>
@@ -512,13 +512,15 @@ quit:
 
 static void cb_recv(struct net_context *net_ctx,
 		    struct net_pkt *pkt,
+		    union net_ip_header *ip_hdr,
+		    union net_proto_header *proto_hdr,
 		    int status,
 		    void *user_data)
 {
 	struct dns_resolve_context *ctx = user_data;
 	struct net_buf *dns_cname = NULL;
 	struct net_buf *dns_data = NULL;
-	u16_t dns_id = 0;
+	u16_t dns_id = 0U;
 	int ret, i;
 
 	ARG_UNUSED(net_ctx);
@@ -853,7 +855,7 @@ try_resolve:
 	}
 
 	for (j = 0; j < SERVER_COUNT; j++) {
-		hop_limit = 0;
+		hop_limit = 0U;
 
 		if (!ctx->servers[j].net_ctx) {
 			continue;
@@ -875,7 +877,7 @@ try_resolve:
 				continue;
 			}
 
-			hop_limit = 1;
+			hop_limit = 1U;
 		}
 
 		ret = dns_write(ctx, j, i, dns_data, dns_qname, hop_limit);
@@ -914,7 +916,7 @@ quit:
 		}
 
 		if (dns_id) {
-			*dns_id = 0;
+			*dns_id = 0U;
 		}
 	}
 

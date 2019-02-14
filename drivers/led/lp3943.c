@@ -26,6 +26,12 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(lp3943);
 
+#ifdef CONFIG_HAS_DTS_I2C
+#define CONFIG_LP3943_DEV_NAME			DT_TI_LP3943_0_LABEL
+#define CONFIG_LP3943_I2C_ADDRESS		DT_TI_LP3943_0_BASE_ADDRESS
+#define CONFIG_LP3943_I2C_MASTER_DEV_NAME	DT_TI_LP3943_0_BUS_NAME
+#endif
+
 #include "led_context.h"
 
 /* LP3943 Registers */
@@ -241,10 +247,10 @@ static int lp3943_led_init(struct device *dev)
 	}
 
 	/* Hardware specific limits */
-	dev_data->min_period = 0;
-	dev_data->max_period = 1600;
-	dev_data->min_brightness = 0;
-	dev_data->max_brightness = 100;
+	dev_data->min_period = 0U;
+	dev_data->max_period = 1600U;
+	dev_data->min_brightness = 0U;
+	dev_data->max_brightness = 100U;
 
 	return 0;
 }

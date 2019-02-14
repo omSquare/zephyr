@@ -11,11 +11,9 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 #include <zephyr.h>
 #include <net/ethernet.h>
+#include <ethernet/eth_stats.h>
 #include <pci/pci.h>
 #include "eth_e1000_priv.h"
-
-#define dev_dbg(fmt, args...) LOG_DBG("%s() " fmt, __func__, ## args)
-#define dev_err(fmt, args...) LOG_ERR("%s() " "Error: " fmt, __func__, ## args)
 
 static const char *e1000_reg_to_string(enum e1000_reg_t r)
 {
@@ -41,7 +39,7 @@ static const char *e1000_reg_to_string(enum e1000_reg_t r)
 	_(RAH);
 	}
 #undef _
-	dev_err("Unsupported register: 0x%x", r);
+	LOG_ERR("Unsupported register: 0x%x", r);
 	k_oops();
 	return NULL;
 }
@@ -50,22 +48,6 @@ static enum ethernet_hw_caps e1000_caps(struct device *dev)
 {
 	return  ETHERNET_LINK_10BASE_T | ETHERNET_LINK_100BASE_T | \
 		ETHERNET_LINK_1000BASE_T;
-}
-
-static size_t e1000_linearize(struct net_pkt *pkt, void *buf, size_t bufsize)
-{
-	size_t len = net_pkt_ll_reserve(pkt) + pkt->frags->len;
-	struct net_buf *nb;
-
-	/* First fragment contains link layer (Ethernet) header */
-	memcpy(buf, net_pkt_ll(pkt), len);
-
-	for (nb = pkt->frags->frags; nb; nb = nb->frags) {
-		memcpy((u8_t *) buf + len, nb->data, nb->len);
-		len += nb->len;
-	}
-
-	return len;
 }
 
 static int e1000_tx(struct e1000_dev *dev, void *data, size_t data_len)
@@ -80,50 +62,48 @@ static int e1000_tx(struct e1000_dev *dev, void *data, size_t data_len)
 		k_yield();
 	}
 
-	dev_dbg("tx.sta: 0x%02hx", dev->tx.sta);
+	LOG_DBG("tx.sta: 0x%02hx", dev->tx.sta);
 
 	return (dev->tx.sta & TDESC_STA_DD) ? 0 : -EIO;
 }
 
-static int e1000_send(struct net_if *iface, struct net_pkt *pkt)
+static int e1000_send(struct device *device, struct net_pkt *pkt)
 {
-	struct e1000_dev *dev = net_if_get_device(iface)->driver_data;
+	struct e1000_dev *dev = device->driver_data;
+	size_t len = net_pkt_get_len(pkt);
 
-	size_t len = e1000_linearize(pkt, dev->txb, sizeof(dev->txb));
-
-	int err = e1000_tx(dev, dev->txb, len);
-
-	if (err) {
-		net_pkt_unref(pkt);
+	if (net_pkt_read_new(pkt, dev->txb, len)) {
+		return -EIO;
 	}
 
-	return err;
+	return e1000_tx(dev, dev->txb, len);
 }
 
 static struct net_pkt *e1000_rx(struct e1000_dev *dev)
 {
 	struct net_pkt *pkt = NULL;
 
-	dev_dbg("rx.sta: 0x%02hx", dev->rx.sta);
+	LOG_DBG("rx.sta: 0x%02hx", dev->rx.sta);
 
 	if (!(dev->rx.sta & RDESC_STA_DD)) {
-		dev_err("RX descriptor not ready");
+		LOG_ERR("RX descriptor not ready");
 		goto out;
 	}
 
-	pkt = net_pkt_get_reserve_rx(0, K_NO_WAIT);
+	pkt = net_pkt_rx_alloc_with_buffer(dev->iface, dev->rx.len - 4,
+					   AF_UNSPEC, 0, K_NO_WAIT);
 	if (!pkt) {
-		dev_err("Out of RX buffers");
+		LOG_ERR("Out of buffers");
 		goto out;
 	}
 
-	if (!net_pkt_append_all(pkt, dev->rx.len - 4,
-				INT_TO_POINTER((u32_t) dev->rx.addr),
-				K_NO_WAIT)) {
-		dev_err("Out of memory for received frame");
+	if (net_pkt_write_new(pkt, INT_TO_POINTER((u32_t) dev->rx.addr),
+			      dev->rx.len - 4)) {
+		LOG_ERR("Out of memory for received frame");
 		net_pkt_unref(pkt);
 		pkt = NULL;
 	}
+
 out:
 	return pkt;
 }
@@ -142,11 +122,13 @@ static void e1000_isr(struct device *device)
 
 		if (pkt) {
 			net_recv_data(dev->iface, pkt);
+		} else {
+			eth_stats_update_errors_rx(dev->iface);
 		}
 	}
 
 	if (icr) {
-		dev_err("Unhandled interrupt, ICR: 0x%x", icr);
+		LOG_ERR("Unhandled interrupt, ICR: 0x%x", icr);
 	}
 }
 
@@ -202,8 +184,6 @@ static void e1000_init(struct net_if *iface)
 	iow32(dev, RDH, 0);
 	iow32(dev, RDT, 1);
 
-	iow32(dev, RCTL, RCTL_EN);
-
 	iow32(dev, IMS, IMS_RXO);
 
 	ral = ior32(dev, RAL);
@@ -212,18 +192,22 @@ static void e1000_init(struct net_if *iface)
 	memcpy(dev->mac, &ral, 4);
 	memcpy(dev->mac + 4, &rah, 2);
 
+	ethernet_init(iface);
+
 	net_if_set_link_addr(iface, dev->mac, sizeof(dev->mac),
 				NET_LINK_ETHERNET);
 
+	IRQ_CONNECT(DT_ETH_E1000_IRQ, DT_ETH_E1000_IRQ_PRIORITY,
+			e1000_isr, DEVICE_GET(eth_e1000),
+			DT_ETH_E1000_IRQ_FLAGS);
+
+	irq_enable(DT_ETH_E1000_IRQ);
+
 	iow32(dev, CTRL, CTRL_SLU); /* Set link up */
 
-	IRQ_CONNECT(CONFIG_ETH_E1000_IRQ, CONFIG_ETH_E1000_IRQ_PRIORITY,
-			e1000_isr, DEVICE_GET(eth_e1000),
-			CONFIG_ETH_E1000_IRQ_FLAGS);
+	iow32(dev, RCTL, RCTL_EN | RCTL_MPE);
 
-	irq_enable(CONFIG_ETH_E1000_IRQ);
-
-	dev_dbg("done");
+	LOG_DBG("done");
 }
 
 #define PCI_VENDOR_ID_INTEL	0x8086
@@ -236,8 +220,8 @@ static struct e1000_dev e1000_dev = {
 
 static const struct ethernet_api e1000_api = {
 	.iface_api.init		= e1000_init,
-	.iface_api.send		= e1000_send,
 	.get_capabilities	= e1000_caps,
+	.send			= e1000_send,
 };
 
 NET_DEVICE_INIT(eth_e1000,

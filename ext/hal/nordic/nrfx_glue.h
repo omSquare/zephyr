@@ -62,7 +62,7 @@ extern "C" {
  * @param expression  Expression to evaluate.
  */
 #define NRFX_STATIC_ASSERT(expression) \
-        static_assert(expression, "assertion failed")
+        BUILD_ASSERT_MSG(expression, "assertion failed")
 
 //------------------------------------------------------------------------------
 
@@ -229,6 +229,16 @@ extern "C" {
 #define NRFX_CUSTOM_ERROR_CODES 0
 
 //------------------------------------------------------------------------------
+
+/**
+ * @brief Bitmask defining DPPI channels reserved to be used outside of nrfx.
+ */
+#define NRFX_DPPI_CHANNELS_USED  0
+
+/**
+ * @brief Bitmask defining DPPI groups reserved to be used outside of nrfx.
+ */
+#define NRFX_DPPI_GROUPS_USED    0
 
 /**
  * @brief Bitmask defining PPI channels reserved to be used outside of nrfx.

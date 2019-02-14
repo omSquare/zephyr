@@ -13,6 +13,7 @@
 
 	chosen {
 		zephyr,console = &usart3;
+		zephyr,shell-uart = &usart3;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 	};
@@ -65,5 +66,9 @@ arduino_serial: &usart6 {};
 };
 
 &usbotg_fs {
+	status = "ok";
+};
+
+&idwg {
 	status = "ok";
 };

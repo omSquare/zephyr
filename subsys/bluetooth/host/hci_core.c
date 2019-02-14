@@ -83,9 +83,11 @@ static bt_ready_cb_t ready_cb;
 
 static bt_le_scan_cb_t *scan_dev_found_cb;
 
+#if defined(CONFIG_BT_ECC)
 static u8_t pub_key[64];
 static struct bt_pub_key_cb *pub_key_cb;
 static bt_dh_key_cb_t dh_key_cb;
+#endif /* CONFIG_BT_ECC */
 
 #if defined(CONFIG_BT_BREDR)
 static bt_br_discovery_cb_t *discovery_cb;
@@ -130,6 +132,46 @@ NET_BUF_POOL_DEFINE(hci_cmd_pool, CONFIG_BT_HCI_CMD_COUNT,
 
 NET_BUF_POOL_DEFINE(hci_rx_pool, CONFIG_BT_RX_BUF_COUNT,
 		    BT_BUF_RX_SIZE, BT_BUF_USER_DATA_MIN, NULL);
+
+struct event_handler {
+	u8_t event;
+	u8_t min_len;
+	void (*handler)(struct net_buf *buf);
+};
+
+#define EVENT_HANDLER(_evt, _handler, _min_len) \
+{ \
+	.event = _evt, \
+	.handler = _handler, \
+	.min_len = _min_len, \
+}
+
+static inline void handle_event(u8_t event, struct net_buf *buf,
+				const struct event_handler *handlers,
+				size_t num_handlers)
+{
+	size_t i;
+
+	for (i = 0; i < num_handlers; i++) {
+		const struct event_handler *handler = &handlers[i];
+
+		if (handler->event != event) {
+			continue;
+		}
+
+		if (buf->len < handler->min_len) {
+			BT_ERR("Too small (%u bytes) event 0x%02x",
+			       buf->len, event);
+			return;
+		}
+
+		handler->handler(buf);
+		return;
+	}
+
+	BT_WARN("Unhandled event 0x%02x len %u: %s", event,
+		buf->len, bt_hex(buf->data, buf->len));
+}
 
 #if defined(CONFIG_BT_HCI_ACL_FLOW_CONTROL)
 static void report_completed_packet(struct net_buf *buf)
@@ -272,7 +314,15 @@ int bt_hci_cmd_send_sync(u16_t opcode, struct net_buf *buf,
 	BT_DBG("opcode 0x%04x status 0x%02x", opcode, cmd(buf)->status);
 
 	if (cmd(buf)->status) {
-		err = -EIO;
+		switch (cmd(buf)->status) {
+		case BT_HCI_ERR_CONN_LIMIT_EXCEEDED:
+			err = -ECONNREFUSED;
+			break;
+		default:
+			err = -EIO;
+			break;
+		}
+
 		net_buf_unref(buf);
 	} else {
 		err = 0;
@@ -326,11 +376,7 @@ static int set_advertise_enable(bool enable)
 		return err;
 	}
 
-	if (enable) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_ADVERTISING);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_ADVERTISING);
-	}
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_ADVERTISING, enable);
 
 	return 0;
 }
@@ -458,11 +504,8 @@ static int set_le_scan_enable(u8_t enable)
 		return err;
 	}
 
-	if (enable == BT_HCI_LE_SCAN_ENABLE) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_SCANNING);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_SCANNING);
-	}
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_SCANNING,
+			  enable == BT_HCI_LE_SCAN_ENABLE);
 
 	return 0;
 }
@@ -471,20 +514,22 @@ static int set_le_scan_enable(u8_t enable)
 #if defined(CONFIG_BT_CONN)
 static void hci_acl(struct net_buf *buf)
 {
-	struct bt_hci_acl_hdr *hdr = (void *)buf->data;
-	u16_t handle, len = sys_le16_to_cpu(hdr->len);
+	struct bt_hci_acl_hdr *hdr;
+	u16_t handle, len;
 	struct bt_conn *conn;
 	u8_t flags;
 
 	BT_DBG("buf %p", buf);
 
+	BT_ASSERT(buf->len >= sizeof(*hdr));
+
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
+	len = sys_le16_to_cpu(hdr->len);
 	handle = sys_le16_to_cpu(hdr->handle);
 	flags = bt_acl_flags(handle);
 
 	acl(buf)->handle = bt_acl_handle(handle);
 	acl(buf)->id = BT_CONN_ID_INVALID;
-
-	net_buf_pull(buf, sizeof(*hdr));
 
 	BT_DBG("handle %u len %u flags %u", acl(buf)->handle, len, flags);
 
@@ -501,7 +546,7 @@ static void hci_acl(struct net_buf *buf)
 		return;
 	}
 
-	acl(buf)->id = bt_conn_get_id(conn);
+	acl(buf)->id = bt_conn_index(conn);
 
 	bt_conn_recv(conn, buf, flags);
 	bt_conn_unref(conn);
@@ -621,7 +666,7 @@ static void hci_disconn_complete(struct net_buf *buf)
 	STACK_ANALYZE("tx stack", tx_thread_stack);
 
 	bt_conn_set_state(conn, BT_CONN_DISCONNECTED);
-	conn->handle = 0;
+	conn->handle = 0U;
 
 	if (conn->type != BT_CONN_TYPE_LE) {
 #if defined(CONFIG_BT_BREDR)
@@ -681,7 +726,10 @@ static int hci_le_read_remote_features(struct bt_conn *conn)
 	return 0;
 }
 
-static int hci_le_set_data_len(struct bt_conn *conn)
+/* LE Data Length Change Event is optional so this function just ignore
+ * error and stack will continue to use default values.
+ */
+static void hci_le_set_data_len(struct bt_conn *conn)
 {
 	struct bt_hci_rp_le_read_max_data_len *rp;
 	struct bt_hci_cp_le_set_data_len *cp;
@@ -691,7 +739,8 @@ static int hci_le_set_data_len(struct bt_conn *conn)
 
 	err = bt_hci_cmd_send_sync(BT_HCI_OP_LE_READ_MAX_DATA_LEN, NULL, &rsp);
 	if (err) {
-		return err;
+		BT_ERR("Failed to read DLE max data len");
+		return;
 	}
 
 	rp = (void *)rsp->data;
@@ -701,7 +750,8 @@ static int hci_le_set_data_len(struct bt_conn *conn)
 
 	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_DATA_LEN, sizeof(*cp));
 	if (!buf) {
-		return -ENOBUFS;
+		BT_ERR("Failed to create LE Set Data Length Command");
+		return;
 	}
 
 	cp = net_buf_add(buf, sizeof(*cp));
@@ -710,10 +760,8 @@ static int hci_le_set_data_len(struct bt_conn *conn)
 	cp->tx_time = sys_cpu_to_le16(tx_time);
 	err = bt_hci_cmd_send(BT_HCI_OP_LE_SET_DATA_LEN, buf);
 	if (err) {
-		return err;
+		BT_ERR("Failed to send LE Set Data Length Command");
 	}
-
-	return 0;
 }
 
 static int hci_le_set_phy(struct bt_conn *conn)
@@ -789,7 +837,7 @@ static struct bt_conn *find_pending_connect(bt_addr_le_t *peer_addr)
 	return bt_conn_lookup_state_le(peer_addr, BT_CONN_CONNECT_DIR_ADV);
 }
 
-static void le_enh_conn_complete(struct bt_hci_evt_le_enh_conn_complete *evt)
+static void enh_conn_complete(struct bt_hci_evt_le_enh_conn_complete *evt)
 {
 	u16_t handle = sys_le16_to_cpu(evt->handle);
 	bt_addr_le_t peer_addr, id_addr;
@@ -880,7 +928,7 @@ static void le_enh_conn_complete(struct bt_hci_evt_le_enh_conn_complete *evt)
 	conn->le.latency = sys_le16_to_cpu(evt->latency);
 	conn->le.timeout = sys_le16_to_cpu(evt->supv_timeout);
 	conn->role = evt->role;
-	conn->err = 0;
+	conn->err = 0U;
 
 	/*
 	 * Use connection address (instead of identity address) as initiator
@@ -942,12 +990,9 @@ static void le_enh_conn_complete(struct bt_hci_evt_le_enh_conn_complete *evt)
 		}
 	}
 
-	if (BT_FEAT_LE_DLE(bt_dev.le.features)) {
-		err = hci_le_set_data_len(conn);
-		if (!err) {
-			atomic_set_bit(conn->flags, BT_CONN_AUTO_DATA_LEN);
-			goto done;
-		}
+	if (IS_ENABLED(CONFIG_BT_DATA_LEN_UPDATE) &&
+	    BT_FEAT_LE_DLE(bt_dev.le.features)) {
+		hci_le_set_data_len(conn);
 	}
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
@@ -960,6 +1005,11 @@ done:
 	if (IS_ENABLED(CONFIG_BT_CENTRAL)) {
 		bt_le_scan_update(false);
 	}
+}
+
+static void le_enh_conn_complete(struct net_buf *buf)
+{
+	enh_conn_complete((void *)buf->data);
 }
 
 static void le_legacy_conn_complete(struct net_buf *buf)
@@ -1001,7 +1051,7 @@ static void le_legacy_conn_complete(struct net_buf *buf)
 		bt_addr_copy(&enh.peer_rpa, BT_ADDR_ANY);
 	}
 
-	le_enh_conn_complete(&enh);
+	enh_conn_complete(&enh);
 }
 
 static void le_remote_feat_complete(struct net_buf *buf)
@@ -1033,15 +1083,10 @@ static void le_remote_feat_complete(struct net_buf *buf)
 		}
 	}
 
-	if (BT_FEAT_LE_DLE(bt_dev.le.features) &&
+	if (IS_ENABLED(CONFIG_BT_DATA_LEN_UPDATE) &&
+	    BT_FEAT_LE_DLE(bt_dev.le.features) &&
 	    BT_FEAT_LE_DLE(conn->le.features)) {
-		int err;
-
-		err = hci_le_set_data_len(conn);
-		if (!err) {
-			atomic_set_bit(conn->flags, BT_CONN_AUTO_DATA_LEN);
-			goto done;
-		}
+		hci_le_set_data_len(conn);
 	}
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
@@ -1053,6 +1098,7 @@ done:
 	bt_conn_unref(conn);
 }
 
+#if defined(CONFIG_BT_DATA_LEN_UPDATE)
 static void le_data_len_change(struct net_buf *buf)
 {
 	struct bt_hci_evt_le_data_len_change *evt = (void *)buf->data;
@@ -1072,19 +1118,13 @@ static void le_data_len_change(struct net_buf *buf)
 	BT_DBG("max. tx: %u (%uus), max. rx: %u (%uus)", max_tx_octets,
 	       max_tx_time, max_rx_octets, max_rx_time);
 
-	if (!atomic_test_and_clear_bit(conn->flags, BT_CONN_AUTO_DATA_LEN)) {
-		goto done;
-	}
+	/* TODO use those */
 
-	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
-	    conn->role == BT_CONN_ROLE_SLAVE) {
-		slave_update_conn_param(conn);
-	}
-
-done:
 	bt_conn_unref(conn);
 }
+#endif /* CONFIG_BT_DATA_LEN_UPDATE */
 
+#if defined(CONFIG_BT_PHY_UPDATE)
 static void le_phy_update_complete(struct net_buf *buf)
 {
 	struct bt_hci_evt_le_phy_update_complete *evt = (void *)buf->data;
@@ -1105,15 +1145,10 @@ static void le_phy_update_complete(struct net_buf *buf)
 		goto done;
 	}
 
-	if (BT_FEAT_LE_DLE(bt_dev.le.features) &&
+	if (IS_ENABLED(CONFIG_BT_DATA_LEN_UPDATE) &&
+	    BT_FEAT_LE_DLE(bt_dev.le.features) &&
 	    BT_FEAT_LE_DLE(conn->le.features)) {
-		int err;
-
-		err = hci_le_set_data_len(conn);
-		if (!err) {
-			atomic_set_bit(conn->flags, BT_CONN_AUTO_DATA_LEN);
-			goto done;
-		}
+		hci_le_set_data_len(conn);
 	}
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
@@ -1124,6 +1159,7 @@ static void le_phy_update_complete(struct net_buf *buf)
 done:
 	bt_conn_unref(conn);
 }
+#endif /* CONFIG_BT_PHY_UPDATE */
 
 bool bt_le_conn_params_valid(const struct bt_le_conn_param *param)
 {
@@ -1147,7 +1183,7 @@ bool bt_le_conn_params_valid(const struct bt_le_conn_param *param)
 	return true;
 }
 
-static int le_conn_param_neg_reply(u16_t handle, u8_t reason)
+static void le_conn_param_neg_reply(u16_t handle, u8_t reason)
 {
 	struct bt_hci_cp_le_conn_param_req_neg_reply *cp;
 	struct net_buf *buf;
@@ -1155,14 +1191,15 @@ static int le_conn_param_neg_reply(u16_t handle, u8_t reason)
 	buf = bt_hci_cmd_create(BT_HCI_OP_LE_CONN_PARAM_REQ_NEG_REPLY,
 				sizeof(*cp));
 	if (!buf) {
-		return -ENOBUFS;
+		BT_ERR("Unable to allocate buffer");
+		return;
 	}
 
 	cp = net_buf_add(buf, sizeof(*cp));
 	cp->handle = sys_cpu_to_le16(handle);
 	cp->reason = sys_cpu_to_le16(reason);
 
-	return bt_hci_cmd_send(BT_HCI_OP_LE_CONN_PARAM_REQ_NEG_REPLY, buf);
+	bt_hci_cmd_send(BT_HCI_OP_LE_CONN_PARAM_REQ_NEG_REPLY, buf);
 }
 
 static int le_conn_param_req_reply(u16_t handle,
@@ -1188,13 +1225,12 @@ static int le_conn_param_req_reply(u16_t handle,
 	return bt_hci_cmd_send(BT_HCI_OP_LE_CONN_PARAM_REQ_REPLY, buf);
 }
 
-static int le_conn_param_req(struct net_buf *buf)
+static void le_conn_param_req(struct net_buf *buf)
 {
 	struct bt_hci_evt_le_conn_param_req *evt = (void *)buf->data;
 	struct bt_le_conn_param param;
 	struct bt_conn *conn;
 	u16_t handle;
-	int err;
 
 	handle = sys_le16_to_cpu(evt->handle);
 	param.interval_min = sys_le16_to_cpu(evt->interval_min);
@@ -1205,19 +1241,16 @@ static int le_conn_param_req(struct net_buf *buf)
 	conn = bt_conn_lookup_handle(handle);
 	if (!conn) {
 		BT_ERR("Unable to lookup conn for handle %u", handle);
-		return le_conn_param_neg_reply(handle,
-					       BT_HCI_ERR_UNKNOWN_CONN_ID);
+		le_conn_param_neg_reply(handle, BT_HCI_ERR_UNKNOWN_CONN_ID);
 	}
 
 	if (!le_param_req(conn, &param)) {
-		err = le_conn_param_neg_reply(handle,
-					      BT_HCI_ERR_INVALID_LL_PARAM);
+		le_conn_param_neg_reply(handle, BT_HCI_ERR_INVALID_LL_PARAM);
 	} else {
-		err = le_conn_param_req_reply(handle, &param);
+		le_conn_param_req_reply(handle, &param);
 	}
 
 	bt_conn_unref(conn);
-	return err;
 }
 
 static void le_conn_update_complete(struct net_buf *buf)
@@ -1631,7 +1664,7 @@ static void conn_complete(struct net_buf *buf)
 	}
 
 	conn->handle = handle;
-	conn->err = 0;
+	conn->err = 0U;
 	conn->encrypt = evt->encr_enabled;
 	update_sec_level_br(conn);
 	bt_conn_set_state(conn, BT_CONN_CONNECTED);
@@ -1688,7 +1721,7 @@ static void link_key_notify(struct net_buf *buf)
 	}
 
 	/* clear any old Link Key flags */
-	conn->br.link_key->flags = 0;
+	conn->br.link_key->flags = 0U;
 
 	switch (evt->key_type) {
 	case BT_LK_COMBINATION:
@@ -2066,7 +2099,7 @@ static void report_discovery_results(void)
 			continue;
 		}
 
-		priv->resolving = 1;
+		priv->resolving = 1U;
 		resolving_names = true;
 	}
 
@@ -2146,7 +2179,6 @@ static struct bt_br_discovery_result *get_result_slot(const bt_addr_t *addr,
 
 static void inquiry_result_with_rssi(struct net_buf *buf)
 {
-	struct bt_hci_evt_inquiry_result_with_rssi *evt;
 	u8_t num_reports = net_buf_pull_u8(buf);
 
 	if (!atomic_test_bit(bt_dev.flags, BT_DEV_INQUIRY)) {
@@ -2155,11 +2187,17 @@ static void inquiry_result_with_rssi(struct net_buf *buf)
 
 	BT_DBG("number of results: %u", num_reports);
 
-	evt = (void *)buf->data;
 	while (num_reports--) {
+		struct bt_hci_evt_inquiry_result_with_rssi *evt;
 		struct bt_br_discovery_result *result;
 		struct discovery_priv *priv;
 
+		if (buf->len < sizeof(*evt)) {
+			BT_ERR("Unexpected end to buffer");
+			return;
+		}
+
+		evt = net_buf_pull_mem(buf, sizeof(*evt));
 		BT_DBG("%s rssi %d dBm", bt_addr_str(&evt->addr), evt->rssi);
 
 		result = get_result_slot(&evt->addr, evt->rssi);
@@ -2176,12 +2214,6 @@ static void inquiry_result_with_rssi(struct net_buf *buf)
 
 		/* we could reuse slot so make sure EIR is cleared */
 		(void)memset(result->eir, 0, sizeof(result->eir));
-
-		/*
-		 * Get next report iteration by moving pointer to right offset
-		 * in buf according to spec 4.2, Vol 2, Part E, 7.7.33.
-		 */
-		evt = net_buf_pull(buf, sizeof(*evt));
 	}
 }
 
@@ -2226,7 +2258,7 @@ static void remote_name_request_complete(struct net_buf *buf)
 	}
 
 	priv = (struct discovery_priv *)&result->_priv;
-	priv->resolving = 0;
+	priv->resolving = 0U;
 
 	if (evt->status) {
 		goto check_names;
@@ -2972,6 +3004,7 @@ done:
 }
 #endif /* CONFIG_BT_SMP */
 
+#if defined(CONFIG_BT_ECC)
 static void le_pkey_complete(struct net_buf *buf)
 {
 	struct bt_hci_evt_le_p256_public_key_complete *evt = (void *)buf->data;
@@ -3002,6 +3035,7 @@ static void le_dhkey_complete(struct net_buf *buf)
 		dh_key_cb = NULL;
 	}
 }
+#endif /* CONFIG_BT_ECC */
 
 static void hci_reset_complete(struct net_buf *buf)
 {
@@ -3051,13 +3085,15 @@ static void hci_cmd_done(u16_t opcode, u8_t status, struct net_buf *buf)
 
 static void hci_cmd_complete(struct net_buf *buf)
 {
-	struct bt_hci_evt_cmd_complete *evt = (void *)buf->data;
-	u16_t opcode = sys_le16_to_cpu(evt->opcode);
-	u8_t status, ncmd = evt->ncmd;
+	struct bt_hci_evt_cmd_complete *evt;
+	u8_t status, ncmd;
+	u16_t opcode;
+
+	evt = net_buf_pull_mem(buf, sizeof(*evt));
+	ncmd = evt->ncmd;
+	opcode = sys_le16_to_cpu(evt->opcode);
 
 	BT_DBG("opcode 0x%04x", opcode);
-
-	net_buf_pull(buf, sizeof(*evt));
 
 	/* All command return parameters have a 1-byte status in the
 	 * beginning, so we can safely make this generalization.
@@ -3074,13 +3110,15 @@ static void hci_cmd_complete(struct net_buf *buf)
 
 static void hci_cmd_status(struct net_buf *buf)
 {
-	struct bt_hci_evt_cmd_status *evt = (void *)buf->data;
-	u16_t opcode = sys_le16_to_cpu(evt->opcode);
-	u8_t ncmd = evt->ncmd;
+	struct bt_hci_evt_cmd_status *evt;
+	u16_t opcode;
+	u8_t ncmd;
+
+	evt = net_buf_pull_mem(buf, sizeof(*evt));
+	opcode = sys_le16_to_cpu(evt->opcode);
+	ncmd = evt->ncmd;
 
 	BT_DBG("opcode 0x%04x", opcode);
-
-	net_buf_pull(buf, sizeof(*evt));
 
 	hci_cmd_done(opcode, evt->status, buf);
 
@@ -3153,12 +3191,8 @@ static int start_le_scan(u8_t scan_type, u16_t interval, u16_t window)
 		return err;
 	}
 
-	if (scan_type == BT_HCI_LE_SCAN_ACTIVE) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_ACTIVE_SCAN);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_ACTIVE_SCAN);
-	}
-
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_ACTIVE_SCAN,
+			  scan_type == BT_HCI_LE_SCAN_ACTIVE);
 
 	return 0;
 }
@@ -3254,9 +3288,12 @@ static void le_adv_report(struct net_buf *buf)
 		bt_addr_le_t id_addr;
 		s8_t rssi;
 
-		info = (void *)buf->data;
-		net_buf_pull(buf, sizeof(*info));
+		if (buf->len < sizeof(*info)) {
+			BT_ERR("Unexpected end of buffer");
+			break;
+		}
 
+		info = net_buf_pull_mem(buf, sizeof(*info));
 		rssi = info->data[info->length];
 
 		BT_DBG("%s event %u, len %u, rssi %d dBm",
@@ -3289,164 +3326,136 @@ static void le_adv_report(struct net_buf *buf)
 		check_pending_conn(&id_addr, &info->addr, info->evt_type);
 #endif /* CONFIG_BT_CENTRAL */
 
-		/* Get next report iteration by moving pointer to right offset
-		 * in buf according to spec 4.2, Vol 2, Part E, 7.7.65.2.
-		 */
 		net_buf_pull(buf, info->length + sizeof(rssi));
 	}
 }
 #endif /* CONFIG_BT_OBSERVER */
 
+static const struct event_handler meta_events[] = {
+#if defined(CONFIG_BT_OBSERVER)
+	EVENT_HANDLER(BT_HCI_EVT_LE_ADVERTISING_REPORT, le_adv_report,
+		      sizeof(struct bt_hci_evt_le_advertising_report)),
+#endif /* CONFIG_BT_OBSERVER */
+#if defined(CONFIG_BT_CONN)
+	EVENT_HANDLER(BT_HCI_EVT_LE_CONN_COMPLETE, le_legacy_conn_complete,
+		      sizeof(struct bt_hci_evt_le_conn_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_LE_ENH_CONN_COMPLETE, le_enh_conn_complete,
+		      sizeof(struct bt_hci_evt_le_enh_conn_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_LE_CONN_UPDATE_COMPLETE,
+		      le_conn_update_complete,
+		      sizeof(struct bt_hci_evt_le_conn_update_complete)),
+	EVENT_HANDLER(BT_HCI_EV_LE_REMOTE_FEAT_COMPLETE,
+		      le_remote_feat_complete,
+		      sizeof(struct bt_hci_evt_le_remote_feat_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_LE_CONN_PARAM_REQ, le_conn_param_req,
+		      sizeof(struct bt_hci_evt_le_conn_param_req)),
+#if defined(CONFIG_BT_DATA_LEN_UPDATE)
+	EVENT_HANDLER(BT_HCI_EVT_LE_DATA_LEN_CHANGE, le_data_len_change,
+		      sizeof(struct bt_hci_evt_le_data_len_change)),
+#endif /* CONFIG_BT_DATA_LEN_UPDATE */
+#if defined(CONFIG_BT_PHY_UPDATE)
+	EVENT_HANDLER(BT_HCI_EVT_LE_PHY_UPDATE_COMPLETE,
+		      le_phy_update_complete,
+		      sizeof(struct bt_hci_evt_le_phy_update_complete)),
+#endif /* CONFIG_BT_PHY_UPDATE */
+#endif /* CONFIG_BT_CONN */
+#if defined(CONFIG_BT_SMP)
+	EVENT_HANDLER(BT_HCI_EVT_LE_LTK_REQUEST, le_ltk_request,
+		      sizeof(struct bt_hci_evt_le_ltk_request)),
+#endif /* CONFIG_BT_SMP */
+#if defined(CONFIG_BT_ECC)
+	EVENT_HANDLER(BT_HCI_EVT_LE_P256_PUBLIC_KEY_COMPLETE, le_pkey_complete,
+		      sizeof(struct bt_hci_evt_le_p256_public_key_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_LE_GENERATE_DHKEY_COMPLETE, le_dhkey_complete,
+		      sizeof(struct bt_hci_evt_le_generate_dhkey_complete)),
+#endif /* CONFIG_BT_SMP */
+};
+
 static void hci_le_meta_event(struct net_buf *buf)
 {
-	struct bt_hci_evt_le_meta_event *evt = (void *)buf->data;
+	struct bt_hci_evt_le_meta_event *evt;
+
+	evt = net_buf_pull_mem(buf, sizeof(*evt));
 
 	BT_DBG("subevent 0x%02x", evt->subevent);
 
-	net_buf_pull(buf, sizeof(*evt));
-
-	switch (evt->subevent) {
-#if defined(CONFIG_BT_CONN)
-	case BT_HCI_EVT_LE_CONN_COMPLETE:
-		le_legacy_conn_complete(buf);
-		break;
-	case BT_HCI_EVT_LE_ENH_CONN_COMPLETE:
-		le_enh_conn_complete((void *)buf->data);
-		break;
-	case BT_HCI_EVT_LE_CONN_UPDATE_COMPLETE:
-		le_conn_update_complete(buf);
-		break;
-	case BT_HCI_EV_LE_REMOTE_FEAT_COMPLETE:
-		le_remote_feat_complete(buf);
-		break;
-	case BT_HCI_EVT_LE_CONN_PARAM_REQ:
-		le_conn_param_req(buf);
-		break;
-	case BT_HCI_EVT_LE_DATA_LEN_CHANGE:
-		le_data_len_change(buf);
-		break;
-	case BT_HCI_EVT_LE_PHY_UPDATE_COMPLETE:
-		le_phy_update_complete(buf);
-		break;
-#endif /* CONFIG_BT_CONN */
-#if defined(CONFIG_BT_SMP)
-	case BT_HCI_EVT_LE_LTK_REQUEST:
-		le_ltk_request(buf);
-		break;
-#endif /* CONFIG_BT_SMP */
-	case BT_HCI_EVT_LE_P256_PUBLIC_KEY_COMPLETE:
-		le_pkey_complete(buf);
-		break;
-	case BT_HCI_EVT_LE_GENERATE_DHKEY_COMPLETE:
-		le_dhkey_complete(buf);
-		break;
-#if defined(CONFIG_BT_OBSERVER)
-	case BT_HCI_EVT_LE_ADVERTISING_REPORT:
-		le_adv_report(buf);
-		break;
-#endif /* CONFIG_BT_OBSERVER */
-	default:
-		BT_WARN("Unhandled LE event 0x%02x len %u: %s",
-			evt->subevent, buf->len, bt_hex(buf->data, buf->len));
-		break;
-	}
+	handle_event(evt->subevent, buf, meta_events, ARRAY_SIZE(meta_events));
 }
+
+static const struct event_handler normal_events[] = {
+	EVENT_HANDLER(BT_HCI_EVT_LE_META_EVENT, hci_le_meta_event,
+		      sizeof(struct bt_hci_evt_le_meta_event)),
+#if defined(CONFIG_BT_BREDR)
+	EVENT_HANDLER(BT_HCI_EVT_CONN_REQUEST, conn_req,
+		      sizeof(struct bt_hci_evt_conn_request)),
+	EVENT_HANDLER(BT_HCI_EVT_CONN_COMPLETE, conn_complete,
+		      sizeof(struct bt_hci_evt_conn_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_PIN_CODE_REQ, pin_code_req,
+		      sizeof(struct bt_hci_evt_pin_code_req)),
+	EVENT_HANDLER(BT_HCI_EVT_LINK_KEY_NOTIFY, link_key_notify,
+		      sizeof(struct bt_hci_evt_link_key_notify)),
+	EVENT_HANDLER(BT_HCI_EVT_LINK_KEY_REQ, link_key_req,
+		      sizeof(struct bt_hci_evt_link_key_req)),
+	EVENT_HANDLER(BT_HCI_EVT_IO_CAPA_RESP, io_capa_resp,
+		      sizeof(struct bt_hci_evt_io_capa_resp)),
+	EVENT_HANDLER(BT_HCI_EVT_IO_CAPA_REQ, io_capa_req,
+		      sizeof(struct bt_hci_evt_io_capa_req)),
+	EVENT_HANDLER(BT_HCI_EVT_SSP_COMPLETE, ssp_complete,
+		      sizeof(struct bt_hci_evt_ssp_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_USER_CONFIRM_REQ, user_confirm_req,
+		      sizeof(struct bt_hci_evt_user_confirm_req)),
+	EVENT_HANDLER(BT_HCI_EVT_USER_PASSKEY_NOTIFY, user_passkey_notify,
+		      sizeof(struct bt_hci_evt_user_passkey_notify)),
+	EVENT_HANDLER(BT_HCI_EVT_USER_PASSKEY_REQ, user_passkey_req,
+		      sizeof(struct bt_hci_evt_user_passkey_req)),
+	EVENT_HANDLER(BT_HCI_EVT_INQUIRY_COMPLETE, inquiry_complete,
+		      sizeof(struct bt_hci_evt_inquiry_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_INQUIRY_RESULT_WITH_RSSI,
+		      inquiry_result_with_rssi,
+		      sizeof(struct bt_hci_evt_inquiry_result_with_rssi)),
+	EVENT_HANDLER(BT_HCI_EVT_EXTENDED_INQUIRY_RESULT,
+		      extended_inquiry_result,
+		      sizeof(struct bt_hci_evt_extended_inquiry_result)),
+	EVENT_HANDLER(BT_HCI_EVT_REMOTE_NAME_REQ_COMPLETE,
+		      remote_name_request_complete,
+		      sizeof(struct bt_hci_evt_remote_name_req_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_AUTH_COMPLETE, auth_complete,
+		      sizeof(struct bt_hci_evt_auth_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_REMOTE_FEATURES,
+		      read_remote_features_complete,
+		      sizeof(struct bt_hci_evt_remote_features)),
+	EVENT_HANDLER(BT_HCI_EVT_REMOTE_EXT_FEATURES,
+		      read_remote_ext_features_complete,
+		      sizeof(struct bt_hci_evt_remote_ext_features)),
+	EVENT_HANDLER(BT_HCI_EVT_ROLE_CHANGE, role_change,
+		      sizeof(struct bt_hci_evt_role_change)),
+	EVENT_HANDLER(BT_HCI_EVT_SYNC_CONN_COMPLETE, synchronous_conn_complete,
+		      sizeof(struct bt_hci_evt_sync_conn_complete)),
+#endif /* CONFIG_BT_BREDR */
+#if defined(CONFIG_BT_CONN)
+	EVENT_HANDLER(BT_HCI_EVT_DISCONN_COMPLETE, hci_disconn_complete,
+		      sizeof(struct bt_hci_evt_disconn_complete)),
+#endif /* CONFIG_BT_CONN */
+#if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_BREDR)
+	EVENT_HANDLER(BT_HCI_EVT_ENCRYPT_CHANGE, hci_encrypt_change,
+		      sizeof(struct bt_hci_evt_encrypt_change)),
+	EVENT_HANDLER(BT_HCI_EVT_ENCRYPT_KEY_REFRESH_COMPLETE,
+		      hci_encrypt_key_refresh_complete,
+		      sizeof(struct bt_hci_evt_encrypt_key_refresh_complete)),
+#endif /* CONFIG_BT_SMP || CONFIG_BT_BREDR */
+};
 
 static void hci_event(struct net_buf *buf)
 {
-	struct bt_hci_evt_hdr *hdr = (void *)buf->data;
+	struct bt_hci_evt_hdr *hdr;
 
+	BT_ASSERT(buf->len >= sizeof(*hdr));
+
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	BT_DBG("event 0x%02x", hdr->evt);
-
 	BT_ASSERT(!bt_hci_evt_is_prio(hdr->evt));
 
-	net_buf_pull(buf, sizeof(*hdr));
-
-	switch (hdr->evt) {
-#if defined(CONFIG_BT_BREDR)
-	case BT_HCI_EVT_CONN_REQUEST:
-		conn_req(buf);
-		break;
-	case BT_HCI_EVT_CONN_COMPLETE:
-		conn_complete(buf);
-		break;
-	case BT_HCI_EVT_PIN_CODE_REQ:
-		pin_code_req(buf);
-		break;
-	case BT_HCI_EVT_LINK_KEY_NOTIFY:
-		link_key_notify(buf);
-		break;
-	case BT_HCI_EVT_LINK_KEY_REQ:
-		link_key_req(buf);
-		break;
-	case BT_HCI_EVT_IO_CAPA_RESP:
-		io_capa_resp(buf);
-		break;
-	case BT_HCI_EVT_IO_CAPA_REQ:
-		io_capa_req(buf);
-		break;
-	case BT_HCI_EVT_SSP_COMPLETE:
-		ssp_complete(buf);
-		break;
-	case BT_HCI_EVT_USER_CONFIRM_REQ:
-		user_confirm_req(buf);
-		break;
-	case BT_HCI_EVT_USER_PASSKEY_NOTIFY:
-		user_passkey_notify(buf);
-		break;
-	case BT_HCI_EVT_USER_PASSKEY_REQ:
-		user_passkey_req(buf);
-		break;
-	case BT_HCI_EVT_INQUIRY_COMPLETE:
-		inquiry_complete(buf);
-		break;
-	case BT_HCI_EVT_INQUIRY_RESULT_WITH_RSSI:
-		inquiry_result_with_rssi(buf);
-		break;
-	case BT_HCI_EVT_EXTENDED_INQUIRY_RESULT:
-		extended_inquiry_result(buf);
-		break;
-	case BT_HCI_EVT_REMOTE_NAME_REQ_COMPLETE:
-		remote_name_request_complete(buf);
-		break;
-	case BT_HCI_EVT_AUTH_COMPLETE:
-		auth_complete(buf);
-		break;
-	case BT_HCI_EVT_REMOTE_FEATURES:
-		read_remote_features_complete(buf);
-		break;
-	case BT_HCI_EVT_REMOTE_EXT_FEATURES:
-		read_remote_ext_features_complete(buf);
-		break;
-	case BT_HCI_EVT_ROLE_CHANGE:
-		role_change(buf);
-		break;
-	case BT_HCI_EVT_SYNC_CONN_COMPLETE:
-		synchronous_conn_complete(buf);
-		break;
-#endif
-#if defined(CONFIG_BT_CONN)
-	case BT_HCI_EVT_DISCONN_COMPLETE:
-		hci_disconn_complete(buf);
-		break;
-#endif /* CONFIG_BT_CONN */
-#if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_BREDR)
-	case BT_HCI_EVT_ENCRYPT_CHANGE:
-		hci_encrypt_change(buf);
-		break;
-	case BT_HCI_EVT_ENCRYPT_KEY_REFRESH_COMPLETE:
-		hci_encrypt_key_refresh_complete(buf);
-		break;
-#endif /* CONFIG_BT_SMP || CONFIG_BT_BREDR */
-	case BT_HCI_EVT_LE_META_EVENT:
-		hci_le_meta_event(buf);
-		break;
-	default:
-		BT_WARN("Unhandled event 0x%02x len %u: %s", hdr->evt,
-			buf->len, bt_hex(buf->data, buf->len));
-		break;
-
-	}
+	handle_event(hdr->evt, buf, normal_events, ARRAY_SIZE(normal_events));
 
 	net_buf_unref(buf);
 }
@@ -3598,7 +3607,7 @@ static void read_bdaddr_complete(struct net_buf *buf)
 
 	bt_addr_copy(&bt_dev.id_addr[0].a, &rp->bdaddr);
 	bt_dev.id_addr[0].type = BT_ADDR_LE_PUBLIC;
-	bt_dev.id_count = 1;
+	bt_dev.id_count = 1U;
 }
 
 static void read_le_features_complete(struct net_buf *buf)
@@ -3781,7 +3790,7 @@ static int le_set_event_mask(void)
 {
 	struct bt_hci_cp_le_set_event_mask *cp_mask;
 	struct net_buf *buf;
-	u64_t mask = 0;
+	u64_t mask = 0U;
 
 	/* Set LE event mask */
 	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_EVENT_MASK, sizeof(*cp_mask));
@@ -3808,12 +3817,14 @@ static int le_set_event_mask(void)
 			mask |= BT_EVT_MASK_LE_CONN_PARAM_REQ;
 		}
 
-		if (BT_FEAT_LE_DLE(bt_dev.le.features)) {
+		if (IS_ENABLED(CONFIG_BT_DATA_LEN_UPDATE) &&
+		    BT_FEAT_LE_DLE(bt_dev.le.features)) {
 			mask |= BT_EVT_MASK_LE_DATA_LEN_CHANGE;
 		}
 
-		if (BT_FEAT_LE_PHY_2M(bt_dev.le.features) ||
-		    BT_FEAT_LE_PHY_CODED(bt_dev.le.features)) {
+		if (IS_ENABLED(CONFIG_BT_PHY_UPDATE) &&
+		    (BT_FEAT_LE_PHY_2M(bt_dev.le.features) ||
+		     BT_FEAT_LE_PHY_CODED(bt_dev.le.features))) {
 			mask |= BT_EVT_MASK_LE_PHY_UPDATE_COMPLETE;
 		}
 	}
@@ -3827,7 +3838,8 @@ static int le_set_event_mask(void)
 	 * If "LE Read Local P-256 Public Key" and "LE Generate DH Key" are
 	 * supported we need to enable events generated by those commands.
 	 */
-	if ((BT_CMD_TEST(bt_dev.supported_commands, 34, 1)) &&
+	if (IS_ENABLED(CONFIG_BT_ECC) &&
+	    (BT_CMD_TEST(bt_dev.supported_commands, 34, 1)) &&
 	    (BT_CMD_TEST(bt_dev.supported_commands, 34, 2))) {
 		mask |= BT_EVT_MASK_LE_P256_PUBLIC_KEY_COMPLETE;
 		mask |= BT_EVT_MASK_LE_GENERATE_DHKEY_COMPLETE;
@@ -3900,6 +3912,7 @@ static int le_init(void)
 	}
 
 	if (IS_ENABLED(CONFIG_BT_CONN) &&
+	    IS_ENABLED(CONFIG_BT_DATA_LEN_UPDATE) &&
 	    BT_FEAT_LE_DLE(bt_dev.le.features)) {
 		struct bt_hci_cp_le_write_default_data_len *cp;
 		struct bt_hci_rp_le_read_max_data_len *rp;
@@ -4170,7 +4183,7 @@ static int set_event_mask(void)
 {
 	struct bt_hci_cp_set_event_mask *ev;
 	struct net_buf *buf;
-	u64_t mask = 0;
+	u64_t mask = 0U;
 
 	buf = bt_hci_cmd_create(BT_HCI_OP_SET_EVENT_MASK, sizeof(*ev));
 	if (!buf) {
@@ -4264,7 +4277,7 @@ static const char *ver_str(u8_t ver)
 {
 	const char * const str[] = {
 		"1.0b", "1.1", "1.2", "2.0", "2.1", "3.0", "4.0", "4.1", "4.2",
-		"5.0",
+		"5.0", "5.1",
 	};
 
 	if (ver < ARRAY_SIZE(str)) {
@@ -4508,35 +4521,31 @@ int bt_recv(struct net_buf *buf)
 	}
 }
 
+static const struct event_handler prio_events[] = {
+	EVENT_HANDLER(BT_HCI_EVT_CMD_COMPLETE, hci_cmd_complete,
+		      sizeof(struct bt_hci_evt_cmd_complete)),
+	EVENT_HANDLER(BT_HCI_EVT_CMD_STATUS, hci_cmd_status,
+		      sizeof(struct bt_hci_evt_cmd_status)),
+#if defined(CONFIG_BT_CONN)
+	EVENT_HANDLER(BT_HCI_EVT_NUM_COMPLETED_PACKETS,
+		      hci_num_completed_packets,
+		      sizeof(struct bt_hci_evt_num_completed_packets)),
+#endif /* CONFIG_BT_CONN */
+};
+
 int bt_recv_prio(struct net_buf *buf)
 {
-	struct bt_hci_evt_hdr *hdr = (void *)buf->data;
+	struct bt_hci_evt_hdr *hdr;
 
 	bt_monitor_send(bt_monitor_opcode(buf), buf->data, buf->len);
 
 	BT_ASSERT(bt_buf_get_type(buf) == BT_BUF_EVT);
 	BT_ASSERT(buf->len >= sizeof(*hdr));
+
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	BT_ASSERT(bt_hci_evt_is_prio(hdr->evt));
 
-	net_buf_pull(buf, sizeof(*hdr));
-
-	switch (hdr->evt) {
-	case BT_HCI_EVT_CMD_COMPLETE:
-		hci_cmd_complete(buf);
-		break;
-	case BT_HCI_EVT_CMD_STATUS:
-		hci_cmd_status(buf);
-		break;
-#if defined(CONFIG_BT_CONN)
-	case BT_HCI_EVT_NUM_COMPLETED_PACKETS:
-		hci_num_completed_packets(buf);
-		break;
-#endif /* CONFIG_BT_CONN */
-	default:
-		net_buf_unref(buf);
-		BT_ASSERT(0);
-		return -EINVAL;
-	}
+	handle_event(hdr->evt, buf, prio_events, ARRAY_SIZE(prio_events));
 
 	net_buf_unref(buf);
 
@@ -4700,6 +4709,7 @@ int bt_enable(bt_ready_cb_t cb)
 			hci_tx_thread, NULL, NULL, NULL,
 			K_PRIO_COOP(CONFIG_BT_HCI_TX_PRIO),
 			0, K_NO_WAIT);
+	k_thread_name_set(&tx_thread_data, "BT TX");
 
 #if !defined(CONFIG_BT_RECV_IS_RX_THREAD)
 	/* RX thread */
@@ -4708,6 +4718,7 @@ int bt_enable(bt_ready_cb_t cb)
 			(k_thread_entry_t)hci_rx_thread, NULL, NULL, NULL,
 			K_PRIO_COOP(CONFIG_BT_RX_PRIO),
 			0, K_NO_WAIT);
+	k_thread_name_set(&rx_thread_data, "BT RX");
 #endif
 
 	if (IS_ENABLED(CONFIG_BT_TINYCRYPT_ECC)) {
@@ -4810,16 +4821,9 @@ int bt_set_name(const char *name)
 	}
 
 	if (IS_ENABLED(CONFIG_BT_SETTINGS)) {
-		char buf[BT_SETTINGS_SIZE(CONFIG_BT_DEVICE_NAME_MAX - 1)];
-		char *str;
-
-		str = settings_str_from_bytes(bt_dev.name, len, buf,
-					      sizeof(buf));
-		if (str) {
-			err = settings_save_one("bt/name", str);
-			if (err) {
-				BT_WARN("Unable to store name");
-			}
+		err = settings_save_one("bt/name", bt_dev.name, len);
+		if (err) {
+			BT_WARN("Unable to store name");
 		}
 	}
 
@@ -4864,7 +4868,7 @@ static int id_find(const bt_addr_le_t *addr)
 {
 	u8_t id;
 
-	for (id = 0; id < bt_dev.id_count; id++) {
+	for (id = 0U; id < bt_dev.id_count; id++) {
 		if (!bt_addr_le_cmp(addr, &bt_dev.id_addr[id])) {
 			return id;
 		}
@@ -5440,11 +5444,8 @@ int bt_le_scan_start(const struct bt_le_scan_param *param, bt_le_scan_cb_t cb)
 		}
 	}
 
-	if (param->filter_dup) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_SCAN_FILTER_DUP);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_SCAN_FILTER_DUP);
-	}
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_SCAN_FILTER_DUP,
+			  param->filter_dup);
 
 	err = start_le_scan(param->type, param->interval, param->window);
 	if (err) {
@@ -5687,17 +5688,10 @@ static int write_scan_enable(u8_t scan)
 		return err;
 	}
 
-	if (scan & BT_BREDR_SCAN_INQUIRY) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_ISCAN);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_ISCAN);
-	}
-
-	if (scan & BT_BREDR_SCAN_PAGE) {
-		atomic_set_bit(bt_dev.flags, BT_DEV_PSCAN);
-	} else {
-		atomic_clear_bit(bt_dev.flags, BT_DEV_PSCAN);
-	}
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_ISCAN,
+			  (scan & BT_BREDR_SCAN_INQUIRY));
+	atomic_set_bit_to(bt_dev.flags, BT_DEV_PSCAN,
+			  (scan & BT_BREDR_SCAN_PAGE));
 
 	return 0;
 }
@@ -5747,6 +5741,7 @@ u16_t bt_hci_get_cmd_opcode(struct net_buf *buf)
 	return cmd(buf)->opcode;
 }
 
+#if defined(CONFIG_BT_ECC)
 int bt_pub_key_gen(struct bt_pub_key_cb *new_cb)
 {
 	struct bt_pub_key_cb *cb;
@@ -5832,6 +5827,7 @@ int bt_dh_key_gen(const u8_t remote_pk[64], bt_dh_key_cb_t cb)
 
 	return 0;
 }
+#endif /* CONFIG_BT_ECC */
 
 #if defined(CONFIG_BT_BREDR)
 int bt_br_oob_get_local(struct bt_br_oob *oob)

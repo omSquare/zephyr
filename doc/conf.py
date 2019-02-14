@@ -14,6 +14,7 @@
 
 import sys
 import os
+from subprocess import CalledProcessError, check_output, DEVNULL
 
 if "ZEPHYR_BASE" not in os.environ:
     sys.exit("$ZEPHYR_BASE environment variable undefined.")
@@ -26,11 +27,27 @@ ZEPHYR_BUILD = os.path.abspath(os.environ["ZEPHYR_BUILD"])
 # Add the 'extensions' directory to sys.path, to enable finding Sphinx
 # extensions within.
 sys.path.insert(0, os.path.join(ZEPHYR_BASE, 'doc', 'extensions'))
-# Also add west, to be able to pull in its API docs.
-sys.path.append(os.path.join(ZEPHYR_BASE, 'scripts', 'meta'))
-# HACK: also add the runners module, to work around some import issues
-# related to west's current packaging.
-sys.path.append(os.path.join(ZEPHYR_BASE, 'scripts', 'meta', 'west'))
+
+# Add the directory which contains the runners package as well,
+# for autodoc directives on runners.xyz.
+sys.path.insert(0, os.path.join(ZEPHYR_BASE, 'scripts', 'west_commands'))
+
+west_found = False
+
+try:
+    desc = check_output(['west', 'list', '-f{abspath}', 'west'],
+			stderr=DEVNULL,
+			cwd=os.path.dirname(__file__))
+    west_path = desc.decode(sys.getdefaultencoding()).strip()
+    # Add west, to be able to pull in its API docs.
+    sys.path.append(os.path.join(west_path, 'src'))
+    west_found = True
+except FileNotFoundError as e:
+    # west not installed
+    pass
+except CalledProcessError as e:
+    # west not able to list itself
+    pass
 
 # -- General configuration ------------------------------------------------
 
@@ -45,6 +62,9 @@ extensions = [
     'sphinx.ext.extlinks',
     'sphinx.ext.autodoc',
     'zephyr.application',
+    'zephyr.html_redirects',
+    'only.eager_only',
+    'zephyr.link-roles'
 ]
 
 # Only use SVG converter when it is really needed, e.g. LaTeX.
@@ -67,8 +87,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'Zephyr Project'
-copyright = u'2015-2018 Zephyr Project members and individual contributors'
-author = u'many'
+copyright = u'2015-2019 Zephyr Project members and individual contributors'
+author = u'The Zephyr Project'
 
 # The following code tries to extract the information by reading the Makefile,
 # when Sphinx is run directly (e.g. by Read the Docs).
@@ -116,6 +136,10 @@ language = None
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 exclude_patterns = ['_build']
+if not west_found:
+    exclude_patterns.append('**/*west-apis*')
+else:
+    exclude_patterns.append('**/*west-not-found*')
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -259,6 +283,27 @@ sourcelink_suffix = '.txt'
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'zephyrdoc'
 
+
+# Custom added feature to allow redirecting old URLs
+#
+# list of tuples (old_url, new_url) for pages to redirect
+# (URLs should be relative to document root, only)
+html_redirect_pages = [
+        ('contribute/contribute_guidelines', 'contribute/index'),
+        ('application/application', 'application/index.rst'),
+        ('security/security', 'security/index'),
+        ('boards/boards', 'boards/index'),
+        ('samples/samples', 'samples/index'),
+        ('releases/release-notes', 'releases/index'),
+        ('getting_started/getting_starting', 'getting_started/index'),
+        ('introduction/introducing_zephyr', 'introduction/index'),
+        ('api/index', 'reference/index'),
+        ('api/api', 'reference/index'),
+        ('subsystems/subsystems', 'reference/index'),
+        ('kernel/kernel', 'reference/kernel/index'),
+
+        ]
+
 # -- Options for LaTeX output ---------------------------------------------
 
 latex_elements = {
@@ -368,6 +413,7 @@ html_context = {
                  ("1.9.2", "/1.9.0/"),
                 )
 }
+
 
 extlinks = {'jira': ('https://jira.zephyrproject.org/browse/%s', ''),
             'github': ('https://github.com/zephyrproject-rtos/zephyr/issues/%s', '')

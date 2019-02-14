@@ -31,7 +31,6 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     )
 endif()
 
-zephyr_cc_option_ifdef (CONFIG_LTO         -flto)
 zephyr_cc_option_ifndef(CONFIG_SSE_FP_MATH -mno-sse)
 
 if(CMAKE_VERBOSE_MAKEFILE)
@@ -44,11 +43,12 @@ set(GENIDT ${ZEPHYR_BASE}/scripts/gen_idt.py)
 
 define_property(GLOBAL PROPERTY PROPERTY_OUTPUT_ARCH BRIEF_DOCS " " FULL_DOCS " ")
 
-# Use gen_idt.py and objcopy to generate irq_int_vector_map.o and
-# staticIdt.o from the elf file zephyr_prebuilt
+# Use gen_idt.py and objcopy to generate irq_int_vector_map.o,
+# irq_vectors_alloc.o, and staticIdt.o from the elf file ${ZEPHYR_PREBUILT_EXECUTABLE}
 set(gen_idt_output_files
   ${CMAKE_CURRENT_BINARY_DIR}/irq_int_vector_map.bin
   ${CMAKE_CURRENT_BINARY_DIR}/staticIdt.bin
+  ${CMAKE_CURRENT_BINARY_DIR}/irq_vectors_alloc.bin
   )
 add_custom_target(
   gen_idt_output
@@ -56,15 +56,16 @@ add_custom_target(
   ${gen_idt_output_files}
   )
 add_custom_command(
-  OUTPUT irq_int_vector_map.bin staticIdt.bin
+  OUTPUT irq_int_vector_map.bin staticIdt.bin irq_vectors_alloc.bin
   COMMAND
   ${PYTHON_EXECUTABLE}
   ${GENIDT}
-  --kernel $<TARGET_FILE:zephyr_prebuilt>
+  --kernel $<TARGET_FILE:${ZEPHYR_PREBUILT_EXECUTABLE}>
   --output-idt staticIdt.bin
   --vector-map irq_int_vector_map.bin
+  --output-vectors-alloc irq_vectors_alloc.bin
   ${GENIDT_EXTRA_ARGS}
-  DEPENDS zephyr_prebuilt
+  DEPENDS ${ZEPHYR_PREBUILT_EXECUTABLE}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
 
@@ -100,29 +101,46 @@ add_custom_command(
   DEPENDS gen_idt_output staticIdt.bin
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
-
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/irq_vectors_alloc.o
+  COMMAND
+  ${CMAKE_OBJCOPY}
+  -I binary
+  -B ${OUTPUT_ARCH}
+  -O ${OUTPUT_FORMAT}
+  --rename-section .data=irq_vectors_alloc_data
+  irq_vectors_alloc.bin
+  irq_vectors_alloc.o
+  DEPENDS gen_idt_output irq_vectors_alloc.bin
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
 
 add_custom_target(irq_int_vector_map_o DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/irq_int_vector_map.o)
 add_custom_target(staticIdt_o          DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/staticIdt.o)
+add_custom_target(irq_vectors_alloc_o  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/irq_vectors_alloc.o)
 
 add_library(irq_int_vector_map STATIC IMPORTED GLOBAL)
 add_library(staticIdt          STATIC IMPORTED GLOBAL)
+add_library(irq_vectors_alloc  STATIC IMPORTED GLOBAL)
 
 set_property(TARGET irq_int_vector_map PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/irq_int_vector_map.o)
 set_property(TARGET staticIdt          PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/staticIdt.o)
+set_property(TARGET irq_vectors_alloc  PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/irq_vectors_alloc.o)
 
 add_dependencies(irq_int_vector_map irq_int_vector_map_o)
 add_dependencies(staticIdt          staticIdt_o)
+add_dependencies(irq_vectors_alloc  irq_vectors_alloc_o)
 
 set_property(GLOBAL APPEND PROPERTY GENERATED_KERNEL_OBJECT_FILES irq_int_vector_map)
 set_property(GLOBAL APPEND PROPERTY GENERATED_KERNEL_OBJECT_FILES staticIdt)
+set_property(GLOBAL APPEND PROPERTY GENERATED_KERNEL_OBJECT_FILES irq_vectors_alloc)
 
 if(CONFIG_X86_MMU)
   # Use gen_mmu.py and objcopy to generate mmu_tables.o from from the
-  # elf file zephyr_prebuilt, creating the temp files mmu_tables.bin
+  # elf file ${ZEPHYR_PREBUILT_EXECUTABLE}, creating the temp files mmu_tables.bin
   # and mmulist.bin along the way.
   #
-  # zephyr_prebuilt.elf -> mmulist.bin -> mmu_tables.bin -> mmu_tables.o
+  # ${ZEPHYR_PREBUILT_EXECUTABLE}.elf -> mmulist.bin -> mmu_tables.bin -> mmu_tables.o
   add_custom_command(
     OUTPUT mmulist.bin
     COMMAND
@@ -130,9 +148,9 @@ if(CONFIG_X86_MMU)
     -I ${OUTPUT_FORMAT}
     -O binary
     -j mmulist
-    $<TARGET_FILE:zephyr_prebuilt>
+    $<TARGET_FILE:${ZEPHYR_PREBUILT_EXECUTABLE}>
     mmulist.bin
-    DEPENDS zephyr_prebuilt
+    DEPENDS ${ZEPHYR_PREBUILT_EXECUTABLE}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
   add_custom_command(
@@ -141,12 +159,12 @@ if(CONFIG_X86_MMU)
     ${PYTHON_EXECUTABLE}
     ${ZEPHYR_BASE}/scripts/gen_mmu_x86.py
     -i mmulist.bin
-    -k $<TARGET_FILE:zephyr_prebuilt>
+    -k $<TARGET_FILE:${ZEPHYR_PREBUILT_EXECUTABLE}>
     -o mmu_tables.bin
     $<$<BOOL:${CMAKE_VERBOSE_MAKEFILE}>:-v>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS mmulist.bin
-    DEPENDS zephyr_prebuilt
+    DEPENDS ${ZEPHYR_PREBUILT_EXECUTABLE}
     )
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mmu_tables.o
@@ -171,19 +189,19 @@ endif()
 
 if(CONFIG_GDT_DYNAMIC)
   # Use gen_gdt.py and objcopy to generate gdt.o from from the elf
-  # file zephyr_prebuilt, creating the temp file gdt.bin along the
+  # file ${ZEPHYR_PREBUILT_EXECUTABLE}, creating the temp file gdt.bin along the
   # way.
   #
-  # zephyr_prebuilt.elf -> gdt.bin -> gdt.o
+  # ${ZEPHYR_PREBUILT_EXECUTABLE}.elf -> gdt.bin -> gdt.o
   add_custom_command(
     OUTPUT gdt.bin
     COMMAND
     ${PYTHON_EXECUTABLE}
     ${ZEPHYR_BASE}/scripts/gen_gdt.py
-    --kernel $<TARGET_FILE:zephyr_prebuilt>
+    --kernel $<TARGET_FILE:${ZEPHYR_PREBUILT_EXECUTABLE}>
     --output-gdt gdt.bin
     $<$<BOOL:${CMAKE_VERBOSE_MAKEFILE}>:--verbose>
-    DEPENDS zephyr_prebuilt
+    DEPENDS ${ZEPHYR_PREBUILT_EXECUTABLE}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
   add_custom_command(

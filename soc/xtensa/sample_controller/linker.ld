@@ -16,6 +16,7 @@
 #include <autoconf.h>
 #include <linker/sections.h>
 
+#include <generated_dts_board.h>
 #include <linker/linker-defs.h>
 #include <linker/linker-tool.h>
 
@@ -521,7 +522,6 @@ SECTIONS
     _data_start = ABSOLUTE(.);
     *(.data)
     *(.data.*)
-    KEEP(*(SW_ISR_TABLE))
     *(.gnu.linkonce.d.*)
     KEEP(*(.gnu.linkonce.d.*personality*))
     *(.data1)

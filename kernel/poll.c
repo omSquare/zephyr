@@ -24,6 +24,16 @@
 #include <misc/dlist.h>
 #include <misc/util.h>
 #include <misc/__assert.h>
+#include <stdbool.h>
+
+/* Single subsystem lock.  Locking per-event would be better on highly
+ * contended SMP systems, but the original locking scheme here is
+ * subtle (it relies on releasing/reacquiring the lock in areas for
+ * latency control and it's sometimes hard to see exactly what data is
+ * "inside" a given critical section).  Do the synchronization port
+ * later as an optimization.
+ */
+static struct k_spinlock lock;
 
 void k_poll_event_init(struct k_poll_event *event, u32_t type,
 		       int mode, void *obj)
@@ -43,35 +53,35 @@ void k_poll_event_init(struct k_poll_event *event, u32_t type,
 }
 
 /* must be called with interrupts locked */
-static inline int is_condition_met(struct k_poll_event *event, u32_t *state)
+static inline bool is_condition_met(struct k_poll_event *event, u32_t *state)
 {
 	switch (event->type) {
 	case K_POLL_TYPE_SEM_AVAILABLE:
 		if (k_sem_count_get(event->sem) > 0) {
 			*state = K_POLL_STATE_SEM_AVAILABLE;
-			return 1;
+			return true;
 		}
 		break;
 	case K_POLL_TYPE_DATA_AVAILABLE:
 		if (!k_queue_is_empty(event->queue)) {
 			*state = K_POLL_STATE_FIFO_DATA_AVAILABLE;
-			return 1;
+			return true;
 		}
 		break;
 	case K_POLL_TYPE_SIGNAL:
-		if (event->signal->signaled) {
+		if (event->signal->signaled != 0) {
 			*state = K_POLL_STATE_SIGNALED;
-			return 1;
+			return true;
 		}
 		break;
 	case K_POLL_TYPE_IGNORE:
-		return 0;
+		break;
 	default:
 		__ASSERT(false, "invalid event type (0x%x)\n", event->type);
 		break;
 	}
 
-	return 0;
+	return false;
 }
 
 static inline void add_event(sys_dlist_t *events, struct k_poll_event *event,
@@ -90,8 +100,7 @@ static inline void add_event(sys_dlist_t *events, struct k_poll_event *event,
 	SYS_DLIST_FOR_EACH_CONTAINER(events, pending, _node) {
 		if (_is_t1_higher_prio_than_t2(poller->thread,
 					       pending->poller->thread)) {
-			sys_dlist_insert_before(events, &pending->_node,
-						&event->_node);
+			sys_dlist_insert(&pending->_node, &event->_node);
 			return;
 		}
 	}
@@ -132,20 +141,22 @@ static inline int register_event(struct k_poll_event *event,
 /* must be called with interrupts locked */
 static inline void clear_event_registration(struct k_poll_event *event)
 {
+	bool remove = false;
+
 	event->poller = NULL;
 
 	switch (event->type) {
 	case K_POLL_TYPE_SEM_AVAILABLE:
 		__ASSERT(event->sem != NULL, "invalid semaphore\n");
-		sys_dlist_remove(&event->_node);
+		remove = true;
 		break;
 	case K_POLL_TYPE_DATA_AVAILABLE:
 		__ASSERT(event->queue != NULL, "invalid queue\n");
-		sys_dlist_remove(&event->_node);
+		remove = true;
 		break;
 	case K_POLL_TYPE_SIGNAL:
 		__ASSERT(event->signal != NULL, "invalid poll signal\n");
-		sys_dlist_remove(&event->_node);
+		remove = true;
 		break;
 	case K_POLL_TYPE_IGNORE:
 		/* nothing to do */
@@ -154,17 +165,20 @@ static inline void clear_event_registration(struct k_poll_event *event)
 		__ASSERT(false, "invalid event type\n");
 		break;
 	}
+	if (remove && sys_dnode_is_linked(&event->_node)) {
+		sys_dlist_remove(&event->_node);
+	}
 }
 
 /* must be called with interrupts locked */
 static inline void clear_event_registrations(struct k_poll_event *events,
 					      int last_registered,
-					      unsigned int key)
+					      k_spinlock_key_t key)
 {
 	for (; last_registered >= 0; last_registered--) {
 		clear_event_registration(&events[last_registered]);
-		irq_unlock(key);
-		key = irq_lock();
+		k_spin_unlock(&lock, key);
+		key = k_spin_lock(&lock);
 	}
 }
 
@@ -181,18 +195,18 @@ int _impl_k_poll(struct k_poll_event *events, int num_events, s32_t timeout)
 	__ASSERT(num_events > 0, "zero events\n");
 
 	int last_registered = -1, rc;
-	unsigned int key;
+	k_spinlock_key_t key;
 
-	struct _poller poller = { .thread = _current, .is_polling = 1, };
+	struct _poller poller = { .thread = _current, .is_polling = true, };
 
 	/* find events whose condition is already fulfilled */
 	for (int ii = 0; ii < num_events; ii++) {
 		u32_t state;
 
-		key = irq_lock();
+		key = k_spin_lock(&lock);
 		if (is_condition_met(&events[ii], &state)) {
 			set_event_ready(&events[ii], state);
-			poller.is_polling = 0;
+			poller.is_polling = false;
 		} else if (timeout != K_NO_WAIT && poller.is_polling) {
 			rc = register_event(&events[ii], &poller);
 			if (rc == 0) {
@@ -201,10 +215,10 @@ int _impl_k_poll(struct k_poll_event *events, int num_events, s32_t timeout)
 				__ASSERT(false, "unexpected return code\n");
 			}
 		}
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 	}
 
-	key = irq_lock();
+	key = k_spin_lock(&lock);
 
 	/*
 	 * If we're not polling anymore, it means that at least one event
@@ -213,20 +227,20 @@ int _impl_k_poll(struct k_poll_event *events, int num_events, s32_t timeout)
 	 */
 	if (!poller.is_polling) {
 		clear_event_registrations(events, last_registered, key);
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 		return 0;
 	}
 
-	poller.is_polling = 0;
+	poller.is_polling = false;
 
 	if (timeout == K_NO_WAIT) {
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 		return -EAGAIN;
 	}
 
 	_wait_q_t wait_q = _WAIT_Q_INIT(&wait_q);
 
-	int swap_rc = _pend_current_thread(key, &wait_q, timeout);
+	int swap_rc = _pend_curr(&lock, key, &wait_q, timeout);
 
 	/*
 	 * Clear all event registrations. If events happen while we're in this
@@ -237,9 +251,9 @@ int _impl_k_poll(struct k_poll_event *events, int num_events, s32_t timeout)
 	 * added to the list of events that occurred, the user has to check the
 	 * return code first, which invalidates the whole list of event states.
 	 */
-	key = irq_lock();
+	key = k_spin_lock(&lock);
 	clear_event_registrations(events, last_registered, key);
-	irq_unlock(key);
+	k_spin_unlock(&lock, key);
 
 	return swap_rc;
 }
@@ -247,7 +261,8 @@ int _impl_k_poll(struct k_poll_event *events, int num_events, s32_t timeout)
 #ifdef CONFIG_USERSPACE
 Z_SYSCALL_HANDLER(k_poll, events, num_events, timeout)
 {
-	int ret, key;
+	int ret;
+	k_spinlock_key_t key;
 	struct k_poll_event *events_copy = NULL;
 	unsigned int bounds;
 
@@ -272,13 +287,13 @@ Z_SYSCALL_HANDLER(k_poll, events, num_events, timeout)
 		goto out;
 	}
 
-	key = irq_lock();
+	key = k_spin_lock(&lock);
 	if (Z_SYSCALL_MEMORY_WRITE(events, bounds)) {
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 		goto oops_free;
 	}
 	(void)memcpy(events_copy, (void *)events, bounds);
-	irq_unlock(key);
+	k_spin_unlock(&lock, key);
 
 	/* Validate what's inside events_copy */
 	for (int i = 0; i < num_events; i++) {
@@ -331,7 +346,7 @@ static int signal_poll_event(struct k_poll_event *event, u32_t state)
 	__ASSERT(event->poller->thread != NULL,
 		 "poller should have a thread\n");
 
-	event->poller->is_polling = 0;
+	event->poller->is_polling = false;
 
 	if (!_is_thread_pending(thread)) {
 		goto ready_event;
@@ -405,7 +420,7 @@ Z_SYSCALL_HANDLER(k_poll_signal_check, signal, signaled, result)
 
 int _impl_k_poll_signal_raise(struct k_poll_signal *signal, int result)
 {
-	unsigned int key = irq_lock();
+	k_spinlock_key_t key = k_spin_lock(&lock);
 	struct k_poll_event *poll_event;
 
 	signal->result = result;
@@ -413,13 +428,13 @@ int _impl_k_poll_signal_raise(struct k_poll_signal *signal, int result)
 
 	poll_event = (struct k_poll_event *)sys_dlist_get(&signal->poll_events);
 	if (poll_event == NULL) {
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 		return 0;
 	}
 
 	int rc = signal_poll_event(poll_event, K_POLL_STATE_SIGNALED);
 
-	_reschedule(key);
+	_reschedule(&lock, key);
 	return rc;
 }
 

@@ -44,11 +44,11 @@
 #include <string.h>
 #include <nvs/nvs.h>
 
-#define NVS_SECTOR_SIZE FLASH_ERASE_BLOCK_SIZE /* Multiple of FLASH_PAGE_SIZE */
+#define NVS_SECTOR_SIZE DT_FLASH_ERASE_BLOCK_SIZE /* Multiple of FLASH_PAGE_SIZE */
 #define NVS_SECTOR_COUNT 3 /* At least 2 sectors */
-#define NVS_STORAGE_OFFSET FLASH_AREA_STORAGE_OFFSET /* Start address of the
-						      * filesystem in flash
-						      */
+#define NVS_STORAGE_OFFSET DT_FLASH_AREA_STORAGE_OFFSET /* Start address of the
+							 * filesystem in flash
+							 */
 static struct nvs_fs fs = {
 	.sector_size = NVS_SECTOR_SIZE,
 	.sector_count = NVS_SECTOR_COUNT,
@@ -73,9 +73,9 @@ void main(void)
 	int rc = 0, cnt = 0, cnt_his = 0;
 	char buf[16];
 	u8_t key[8], longarray[128];
-	u32_t reboot_counter = 0, reboot_counter_his;
+	u32_t reboot_counter = 0U, reboot_counter_his;
 
-	rc = nvs_init(&fs, FLASH_DEV_NAME);
+	rc = nvs_init(&fs, DT_FLASH_DEV_NAME);
 	if (rc) {
 		printk("Flash Init failed\n");
 	}
@@ -216,6 +216,13 @@ void main(void)
 				}
 				sys_reboot(0);
 			}
+		} else {
+			printk("Reboot counter reached max value.\n");
+			printk("Reset to 0 and exit test.\n");
+			reboot_counter = 0;
+			nvs_write(&fs, RBT_CNT_ID, &reboot_counter,
+			  sizeof(reboot_counter));
+			break;
 		}
 	}
 }

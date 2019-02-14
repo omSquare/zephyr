@@ -10,8 +10,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_MODULE_NAME net_mdns_responder
-#define NET_LOG_LEVEL CONFIG_MDNS_RESPONDER_LOG_LEVEL
+#include <logging/log.h>
+LOG_MODULE_REGISTER(net_mdns_responder, CONFIG_MDNS_RESPONDER_LOG_LEVEL);
 
 #include <zephyr.h>
 #include <init.h>
@@ -382,6 +382,8 @@ quit:
 
 static void recv_cb(struct net_context *net_ctx,
 		    struct net_pkt *pkt,
+		    union net_ip_header *ip_hdr,
+		    union net_proto_header *proto_hdr,
 		    int status,
 		    void *user_data)
 {

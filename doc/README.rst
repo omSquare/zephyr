@@ -1,7 +1,7 @@
 .. _zephyr_doc:
 
-Zephyr Documentation Generation
-###############################
+Documentation Generation
+########################
 
 These instructions will walk you through generating the Zephyr Project's
 documentation on your local system using the same documentation sources
@@ -37,6 +37,9 @@ The project's documentation contains the following items:
 * Script-generated material for kernel configuration options based on Kconfig
   files found in the source code tree
 
+.. image:: images/doc-gen-flow.png
+   :align: center
+
 The reStructuredText files are processed by the Sphinx documentation system,
 and make use of the breathe extension for including the doxygen-generated API
 material.  Additional tools are required to generate the
@@ -53,7 +56,7 @@ Our documentation processing has been tested to run with:
 * docutils version 0.14
 * sphinx_rtd_theme version 0.4.0
 * sphinxcontrib-svg2pdfconverter version 0.1.0
-* Latexmk version version 4.56
+* Latexmk version 4.56
 
 In order to install the documentation tools, first install Zephyr as
 described in :ref:`getting_started`. Then install additional tools
@@ -163,7 +166,7 @@ folder, here are the commands to generate the html content locally:
 Depending on your development system, it will take up to 15 minutes to
 collect and generate the HTML content.  When done, you can view the HTML
 output with your browser started at ``doc/_build/html/index.html`` and
-the PDF file is available at ``doc/_build/pdf/zephyr.pdf``.
+if generated, the PDF file is available at ``doc/_build/pdf/zephyr.pdf``.
 
 If you want to build the documentation from scratch just delete the contents
 of the build folder and run ``cmake`` and then ``ninja`` again.
@@ -208,6 +211,28 @@ documentation and run across these warnings, you can include filtering
 them out as "expected" warnings by adding a conf file to the
 ``.known-issues/doc`` folder, following the example of other conf files
 found there.
+
+Developer-mode Document Building
+********************************
+
+Building the documentation for all the Kconfig options significantly
+adds to the total doc build time.  When making and testing major changes
+to the documentation, we provide an option to temporarily stub-out
+the auto-generated configuration documentation so the doc build process
+runs much faster.
+
+To enable this mode, set the following option when invoking cmake::
+
+   -DKCONFIG_TURBO_MODE=1
+
+or invoke make with the following target::
+
+   cd ~/zephyr
+   source zephyr-env.sh
+
+   # To generate HTML output without detailed Kconfig
+   make htmldocs-fast
+
 
 .. _reStructuredText: http://sphinx-doc.org/rest.html
 .. _Sphinx: http://sphinx-doc.org/

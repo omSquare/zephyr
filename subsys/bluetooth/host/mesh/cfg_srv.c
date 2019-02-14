@@ -51,7 +51,7 @@ static void hb_send(struct bt_mesh_model *model)
 {
 
 	struct bt_mesh_cfg_srv *cfg = model->user_data;
-	u16_t feat = 0;
+	u16_t feat = 0U;
 	struct __packed {
 		u8_t  init_ttl;
 		u16_t feat;
@@ -130,7 +130,7 @@ static int comp_add_elem(struct net_buf_simple *buf, struct bt_mesh_elem *elem,
 
 static int comp_get_page_0(struct net_buf_simple *buf)
 {
-	u16_t feat = 0;
+	u16_t feat = 0U;
 	const struct bt_mesh_comp *comp;
 	int i;
 
@@ -184,7 +184,7 @@ static void dev_comp_data_get(struct bt_mesh_model *model,
 	page = net_buf_simple_pull_u8(buf);
 	if (page != 0) {
 		BT_WARN("Composition page %u not available", page);
-		page = 0;
+		page = 0U;
 	}
 
 	bt_mesh_model_msg_init(&sdu, OP_DEV_COMP_DATA_STATUS);
@@ -643,7 +643,7 @@ static void app_key_get(struct bt_mesh_model *model,
 	}
 
 	prev = BT_MESH_KEY_UNUSED;
-	for (i = 0; i < ARRAY_SIZE(bt_mesh.app_keys); i++) {
+	for (i = 0U; i < ARRAY_SIZE(bt_mesh.app_keys); i++) {
 		struct bt_mesh_app_key *key = &bt_mesh.app_keys[i];
 
 		if (key->net_idx != get_idx) {
@@ -1049,7 +1049,7 @@ static void mod_pub_get(struct bt_mesh_model *model,
 			struct bt_mesh_msg_ctx *ctx,
 			struct net_buf_simple *buf)
 {
-	u16_t elem_addr, pub_addr = 0;
+	u16_t elem_addr, pub_addr = 0U;
 	struct bt_mesh_model *mod;
 	struct bt_mesh_elem *elem;
 	u8_t *mod_id, status;
@@ -1181,7 +1181,7 @@ static u8_t va_add(u8_t *label_uuid, u16_t *addr)
 		return STATUS_UNSPECIFIED;
 	}
 
-	free_slot->ref = 1;
+	free_slot->ref = 1U;
 	free_slot->addr = *addr;
 	memcpy(free_slot->uuid, label_uuid, 16);
 
@@ -1252,9 +1252,7 @@ static void mod_pub_va_set(struct bt_mesh_model *model,
 		return;
 	}
 
-	label_uuid = buf->data;
-	net_buf_simple_pull(buf, 16);
-
+	label_uuid = net_buf_simple_pull_mem(buf, 16);
 	pub_app_idx = net_buf_simple_pull_le16(buf);
 	cred_flag = ((pub_app_idx >> 12) & BIT_MASK(1));
 	pub_app_idx &= BIT_MASK(12);
@@ -1280,14 +1278,14 @@ static void mod_pub_va_set(struct bt_mesh_model *model,
 	if (!elem) {
 		mod = NULL;
 		vnd = (buf->len == 4);
-		pub_addr = 0;
+		pub_addr = 0U;
 		status = STATUS_INVALID_ADDRESS;
 		goto send_status;
 	}
 
 	mod = get_model(elem, buf, &vnd);
 	if (!mod) {
-		pub_addr = 0;
+		pub_addr = 0U;
 		status = STATUS_INVALID_MODEL;
 		goto send_status;
 	}
@@ -1316,7 +1314,7 @@ static void mod_pub_va_set(struct bt_mesh_model *model,
 	u8_t *mod_id, status;
 	struct bt_mesh_model *mod;
 	struct bt_mesh_elem *elem;
-	u16_t elem_addr, pub_addr = 0;
+	u16_t elem_addr, pub_addr = 0U;
 	bool vnd;
 
 	elem_addr = net_buf_simple_pull_le16(buf);
@@ -1784,8 +1782,7 @@ static void mod_sub_va_add(struct bt_mesh_model *model,
 		return;
 	}
 
-	label_uuid = buf->data;
-	net_buf_simple_pull(buf, 16);
+	label_uuid = net_buf_simple_pull_mem(buf, 16);
 
 	BT_DBG("elem_addr 0x%04x", elem_addr);
 
@@ -1862,8 +1859,7 @@ static void mod_sub_va_del(struct bt_mesh_model *model,
 		return;
 	}
 
-	label_uuid = buf->data;
-	net_buf_simple_pull(buf, 16);
+	label_uuid = net_buf_simple_pull_mem(buf, 16);
 
 	BT_DBG("elem_addr 0x%04x", elem_addr);
 
@@ -1930,8 +1926,7 @@ static void mod_sub_va_overwrite(struct bt_mesh_model *model,
 		return;
 	}
 
-	label_uuid = buf->data;
-	net_buf_simple_pull(buf, 16);
+	label_uuid = net_buf_simple_pull_mem(buf, 16);
 
 	BT_DBG("elem_addr 0x%04x", elem_addr);
 
@@ -2324,7 +2319,7 @@ static void net_key_get(struct bt_mesh_model *model,
 	bt_mesh_model_msg_init(&msg, OP_NET_KEY_LIST);
 
 	prev = BT_MESH_KEY_UNUSED;
-	for (i = 0; i < ARRAY_SIZE(bt_mesh.sub); i++) {
+	for (i = 0U; i < ARRAY_SIZE(bt_mesh.sub); i++) {
 		struct bt_mesh_subnet *sub = &bt_mesh.sub[i];
 
 		if (sub->net_idx == BT_MESH_KEY_UNUSED) {
@@ -3062,7 +3057,7 @@ static void hb_sub_send_status(struct bt_mesh_model *model,
 
 	uptime = k_uptime_get();
 	if (uptime > cfg->hb_sub.expiry) {
-		period = 0;
+		period = 0U;
 	} else {
 		period = (cfg->hb_sub.expiry - uptime) / 1000;
 	}
@@ -3490,6 +3485,13 @@ struct bt_mesh_hb_pub *bt_mesh_hb_pub_get(void)
 	}
 
 	return &conf->hb_pub;
+}
+
+void bt_mesh_hb_pub_disable(void)
+{
+	if (conf) {
+		hb_pub_disable(conf);
+	}
 }
 
 struct bt_mesh_cfg_srv *bt_mesh_cfg_get(void)

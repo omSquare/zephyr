@@ -120,6 +120,12 @@
 #define NRFX_CLOCK_CONFIG_LF_SRC 1
 #endif
 
+// <q> NRFX_CLOCK_CONFIG_LF_CAL_ENABLED  - Enables LF Clock Calibration Support
+
+#ifndef NRFX_CLOCK_CONFIG_LF_CAL_ENABLED
+#define NRFX_CLOCK_CONFIG_LF_CAL_ENABLED 0
+#endif
+
 // <o> NRFX_CLOCK_CONFIG_IRQ_PRIORITY  - Interrupt priority
 
 // <0=> 0 (highest)
@@ -775,6 +781,18 @@
 
 // <e> NRFX_RTC_ENABLED - nrfx_rtc - RTC peripheral driver
 //==========================================================
+#ifdef CONFIG_NRFX_RTC
+#define NRFX_RTC_ENABLED 1
+#endif
+
+#ifdef CONFIG_NRFX_RTC0
+#define NRFX_RTC0_ENABLED 1
+#endif
+
+#ifdef CONFIG_NRFX_RTC1
+#define NRFX_RTC1_ENABLED 1
+#endif
+
 #ifndef NRFX_RTC_ENABLED
 #define NRFX_RTC_ENABLED 0
 #endif
@@ -1163,6 +1181,7 @@
 #ifdef CONFIG_NRFX_TIMER
 #define NRFX_TIMER_ENABLED 1
 #endif
+
 // <q> NRFX_TIMER0_ENABLED  - Enable TIMER0 instance
 
 
@@ -1523,6 +1542,15 @@
 
 #ifndef NRFX_WDT_CONFIG_RELOAD_VALUE
 #define NRFX_WDT_CONFIG_RELOAD_VALUE 2000
+#endif
+
+// <o> NRFX_WDT_CONFIG_NO_IRQ  - Remove WDT IRQ handling from WDT driver
+
+// <0=> Include WDT IRQ handling
+// <1=> Remove WDT IRQ handling
+
+#ifndef NRFX_WDT_CONFIG_NO_IRQ
+#define NRFX_WDT_CONFIG_NO_IRQ 0
 #endif
 
 // <o> NRFX_WDT_CONFIG_IRQ_PRIORITY  - Interrupt priority

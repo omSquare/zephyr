@@ -1,4 +1,13 @@
-include(${ZEPHYR_BASE}/cmake/host-tools-zephyr.cmake)
+include(${ZEPHYR_BASE}/cmake/toolchain/zephyr/host-tools.cmake)
+
+# west is optional
+find_program(
+  WEST
+  west
+  )
+if(${WEST} STREQUAL WEST-NOTFOUND)
+  unset(WEST)
+endif()
 
 # Search for the must-have program dtc on PATH and in
 # TOOLCHAIN_HOME. Usually DTC will be provided by an SDK, but for
@@ -22,11 +31,11 @@ execute_process(
 string(REGEX MATCH "Version: DTC ([0-9]+\.[0-9]+.[0-9]+).*" out_var ${dtc_version_output})
 if(${CMAKE_MATCH_1} VERSION_LESS ${MIN_DTC_VERSION})
   assert(0 "The detected dtc version is unsupported.                                 \n\
-	  The version was found to be ${CMAKE_MATCH_1}                                   \n\
-	  But the minimum supported version is ${MIN_DTC_VERSION}                        \n\
-	  See https://docs.zephyrproject.org/latest/getting_started/getting_started.html \n\
-	  for how to use the SDK's dtc alongside a custom toolchain."
-	)
+    The version was found to be ${CMAKE_MATCH_1}                                   \n\
+    But the minimum supported version is ${MIN_DTC_VERSION}                        \n\
+    See https://docs.zephyrproject.org/latest/getting_started/                     \n\
+    for how to use the SDK's dtc alongside a custom toolchain."
+  )
 endif()
 
 find_program(

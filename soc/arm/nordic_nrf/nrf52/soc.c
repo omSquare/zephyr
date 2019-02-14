@@ -15,6 +15,10 @@
 #include <kernel.h>
 #include <init.h>
 #include <cortex_m/exc.h>
+#include <nrfx.h>
+#include <nrf_power.h>
+#include <soc/nrfx_coredep.h>
+#include <logging/log.h>
 
 #ifdef CONFIG_RUNTIME_NMI
 extern void _NmiInit(void);
@@ -33,12 +37,18 @@ extern void _NmiInit(void);
 #error "Unknown SoC."
 #endif
 
-#include <nrf.h>
 #include <hal/nrf_power.h>
 
 #define LOG_LEVEL CONFIG_SOC_LOG_LEVEL
-#include <logging/log.h>
 LOG_MODULE_REGISTER(soc);
+
+/* Overrides the weak ARM implementation:
+   Set general purpose retention register and reboot */
+void sys_arch_reboot(int type)
+{
+	nrf_power_gpregret_set((uint8_t)type);
+	NVIC_SystemReset();
+}
 
 static int nordicsemi_nrf52_init(struct device *arg)
 {
@@ -69,6 +79,11 @@ static int nordicsemi_nrf52_init(struct device *arg)
 	irq_unlock(key);
 
 	return 0;
+}
+
+void z_arch_busy_wait(u32_t time_us)
+{
+	nrfx_coredep_delay_us(time_us);
 }
 
 SYS_INIT(nordicsemi_nrf52_init, PRE_KERNEL_1, 0);

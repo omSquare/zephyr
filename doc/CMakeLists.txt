@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.8.2)
-project(Zephyr-Kernel-Doc VERSION ${PROJECT_VERSION} LANGUAGES)
+cmake_minimum_required(VERSION 3.13.1)
+project(Zephyr-Kernel-Doc LANGUAGES)
 
 set(ZEPHYR_BASE $ENV{ZEPHYR_BASE})
 
@@ -14,7 +14,7 @@ find_package(LATEX)
 
 find_program(
   SPHINXBUILD
-  sphinx-build
+  NAMES sphinx-build-3 sphinx-build
   )
 if(${SPHINXBUILD} STREQUAL SPHINXBUILD-NOTFOUND)
   message(FATAL_ERROR "The 'sphinx-build' command was not found. Make sure you have Sphinx installed.")
@@ -73,28 +73,19 @@ set(DOC_WARN ${CMAKE_CURRENT_BINARY_DIR}/doc.warnings)
 set(CONTENT_OUTPUTS ${CMAKE_CURRENT_BINARY_DIR}/extracted-content.txt)
 
 configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
+file(TOUCH ${CMAKE_CURRENT_BINARY_DIR}/Kconfig.modules)
 
-# This command is used to find all documentation source files so they
-# can be copied into the build directory, and the copies can be
-# properly tracked by CMake as built files.
+# This command is used to copy all documentation source files into the build
+# directory,
 #
 # We need to make copies because Sphinx requires a single
 # documentation root directory, but Zephyr's documentation is
 # scattered around the tree in samples/, boards/, and doc/. Putting
 # them into a single rooted tree in the build directory is a
 # workaround for this limitation.
-#
-# This command does NOT cause the content files to be copied; we leave
-# that up to an add_custom_command() below. (Ninja will copy them during
-# the first build regardless of if they exist already or not, so
-# --just-outputs means the copy only happens once. The build system
-# has to know about the relationship between sources and copies to
-# track dependencies properly, for the "clean" target, etc.)
 set(EXTRACT_CONTENT_COMMAND
   ${CMAKE_COMMAND} -E env
   ${PYTHON_EXECUTABLE} scripts/extract_content.py
-  # Just save the outputs for processing by this list file.
-  --outputs ${CONTENT_OUTPUTS} --just-outputs
   # Ignore any files in the output directory.
   --ignore ${CMAKE_CURRENT_BINARY_DIR}
   # Copy all files in doc to the rst folder.
@@ -112,42 +103,12 @@ set(EXTRACT_CONTENT_COMMAND
   "*.rst:samples:${RST_OUT}" "*.rst:boards:${RST_OUT}"
   "*.rst:samples:${RST_OUT}/doc" "*.rst:boards:${RST_OUT}/doc")
 
-# Run the content extraction command at configure time in order to
-# produce lists of input and output files, which are respectively its
-# dependencies and outputs.
-execute_process(
+add_custom_target(
+  content
+  # Copy all files in doc/ to the rst folder
   COMMAND ${EXTRACT_CONTENT_COMMAND}
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-  RESULT_VARIABLE RET)
-
-if (NOT RET EQUAL 0)
-  message(FATAL_ERROR "Cannot prepare documentation content extraction")
-endif()
-
-# Load the outputs listing from extract_content.py. This is a file
-# where each pair of lines is a source file in the Zephyr tree and a
-# destination file in the build directory.
-file(STRINGS ${CONTENT_OUTPUTS} EXTRACT_CONTENT_RAW)
-
-# Build up a list of output files for later use in target/command
-# DEPENDS. Make sure each output file gets updated if the
-# corresponding input file changes.
-set(EXTRACT_CONTENT_OUTPUTS)
-while(EXTRACT_CONTENT_RAW)
-  list(GET EXTRACT_CONTENT_RAW 0 SRC)
-  list(GET EXTRACT_CONTENT_RAW 1 DST)
-
-  add_custom_command(
-    COMMAND ${CMAKE_COMMAND} -E copy ${SRC} ${DST}
-    DEPENDS ${SRC}
-    OUTPUT ${DST}
-    )
-
-  list(REMOVE_AT EXTRACT_CONTENT_RAW 0 1)
-  list(APPEND EXTRACT_CONTENT_OUTPUTS ${DST})
-endwhile()
-
-add_custom_target(content DEPENDS ${EXTRACT_CONTENT_OUTPUTS})
+)
 
 set(ARGS ${DOXYFILE_OUT})
 
@@ -161,6 +122,22 @@ add_custom_target(
     -DWORKING_DIRECTORY=${CMAKE_CURRENT_LIST_DIR}
     -P ${ZEPHYR_BASE}/cmake/util/execute_process.cmake
 )
+
+# Doxygen doesn't support incremental builds.
+# It could be ok because it's pretty fast.
+# But it's not because it has a cascade effect on sphinx:
+# https://sourceforge.net/p/doxygen/mailman/message/36580807/
+# For now this optimization speeds-up non-doxygen documentation work
+# only (by one order of magnitude).
+add_custom_target(
+  doxy_real_modified_times
+  COMMAND ${CMAKE_COMMAND} -E env
+    ${PYTHON_EXECUTABLE} scripts/restore_modification_times.py
+      --loglevel ERROR  _build/doxygen/xml
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+)
+
+add_dependencies(doxy_real_modified_times doxy)
 
 add_custom_target(
   pristine
@@ -182,8 +159,13 @@ add_custom_target(
   KERNELVERSION=${KERNELVERSION}
   BOARD_DIR=boards/*/*/
   ARCH=*
+  ARCH_DIR=arch/
   SOC_DIR=soc/
   SRCARCH=x86
+  PROJECT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+  GENERATED_DTS_BOARD_CONF=not_applicable
+  KCONFIG_TURBO_MODE=${KCONFIG_TURBO_MODE}
+  KCONFIG_DOC_MODE=1
   ${PYTHON_EXECUTABLE} scripts/genrest.py Kconfig ${RST_OUT}/doc/reference/kconfig/
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
 )
@@ -296,14 +278,14 @@ endif()
 #
 # Dependencies and final targets
 #
-add_dependencies(html content doxy kconfig)
+add_dependencies(html content doxy_real_modified_times kconfig)
 
 add_custom_target(
   htmldocs
 )
 add_dependencies(htmldocs html)
 
-add_dependencies(latex content doxy kconfig)
+add_dependencies(latex content doxy_real_modified_times kconfig)
 
 add_custom_target(
   latexdocs

@@ -14,9 +14,11 @@
 
 	chosen {
 		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
 		zephyr,uart-mcumgr = &uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
 	};
 
 	leds {
@@ -122,7 +124,7 @@
 &flash0 {
 	/*
 	 * For more information, see:
-	 * http://docs.zephyrproject.org/latest/devices/dts/flash_partitions.html
+	 * http://docs.zephyrproject.org/latest/guides/dts/index.html#flash-partitions
 	 */
 	partitions {
 		compatible = "fixed-partitions";
@@ -145,12 +147,9 @@
 			label = "image-scratch";
 			reg = <0x0003c000 0x2000>;
 		};
-
-#if defined(CONFIG_FS_FLASH_STORAGE_PARTITION)
 		storage_partition: partition@3e000 {
 			label = "storage";
 			reg = <0x0003e000 0x00002000>;
 		};
-#endif
 	};
 };

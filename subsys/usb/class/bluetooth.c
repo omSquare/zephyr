@@ -21,7 +21,7 @@
 
 #define LOG_LEVEL CONFIG_USB_DEVICE_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(usb_bluetooth)
+LOG_MODULE_REGISTER(usb_bluetooth);
 
 #if !defined(CONFIG_USB_COMPOSITE_DEVICE)
 static u8_t interface_data[64];
@@ -57,7 +57,8 @@ struct usb_bluetooth_config {
 	struct usb_ep_descriptor if0_in_ep;
 } __packed;
 
-USBD_CLASS_DESCR_DEFINE(primary) struct usb_bluetooth_config bluetooth_cfg = {
+USBD_CLASS_DESCR_DEFINE(primary, 0)
+	struct usb_bluetooth_config bluetooth_cfg = {
 	/* Interface descriptor 0 */
 	.if0 = {
 		.bLength = sizeof(struct usb_if_descriptor),
@@ -231,6 +232,8 @@ static void bluetooth_status_cb(enum usb_dc_status_code status,
 	case USB_DC_RESUME:
 		LOG_DBG("USB device resumed");
 		break;
+	case USB_DC_SOF:
+		break;
 	case USB_DC_UNKNOWN:
 	default:
 		LOG_DBG("USB unknown state");
@@ -266,8 +269,11 @@ static int bluetooth_class_handler(struct usb_setup_packet *setup,
 	return 0;
 }
 
-static void bluetooth_interface_config(u8_t bInterfaceNumber)
+static void bluetooth_interface_config(struct usb_desc_header *head,
+				       u8_t bInterfaceNumber)
 {
+	ARG_UNUSED(head);
+
 	bluetooth_cfg.if0.bInterfaceNumber = bInterfaceNumber;
 }
 

@@ -61,10 +61,10 @@
 #include <misc/util.h>
 #include <misc/__assert.h>
 #include <init.h>
-#include <board.h>
-#if defined(USB_VUSB_EN_GPIO)
+#if defined(CONFIG_USB_VBUS_GPIO)
 #include <gpio.h>
 #endif
+#include <misc/byteorder.h>
 #include <usb/usb_device.h>
 #include <usb/usbstruct.h>
 #include <usb/usb_common.h>
@@ -72,7 +72,7 @@
 
 #define LOG_LEVEL CONFIG_USB_DEVICE_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(usb_device)
+LOG_MODULE_REGISTER(usb_device);
 
 #include <usb/bos.h>
 #include <os_desc.h>
@@ -180,9 +180,9 @@ static void usb_print_setup(struct usb_setup_packet *setup)
 	LOG_DBG("Setup: %x %x %x %x %x",
 		setup->bmRequestType,
 		setup->bRequest,
-		setup->wValue,
-		setup->wIndex,
-		setup->wLength);
+		sys_le16_to_cpu(setup->wValue),
+		sys_le16_to_cpu(setup->wIndex),
+		sys_le16_to_cpu(setup->wLength));
 }
 
 /*
@@ -252,13 +252,15 @@ static void usb_data_to_host(void)
 static void usb_handle_control_transfer(u8_t ep,
 					enum usb_dc_ep_cb_status_code ep_status)
 {
-	u32_t chunk = 0;
-	u32_t type = 0;
+	u32_t chunk = 0U;
+	u32_t type = 0U;
 	struct usb_setup_packet *setup = &usb_dev.setup;
 
 	LOG_DBG("ep %x, status %x", ep, ep_status);
 
 	if (ep == USB_CONTROL_OUT_EP0 && ep_status == USB_DC_EP_SETUP) {
+		u16_t length;
+
 		/*
 		 * OUT transfer, Setup packet,
 		 * reset request message state machine
@@ -270,6 +272,8 @@ static void usb_handle_control_transfer(u8_t ep,
 			return;
 		}
 
+		length = sys_le16_to_cpu(setup->wLength);
+
 		/* Defaults for data pointer and residue */
 		type = REQTYPE_GET_TYPE(setup->bmRequestType);
 		usb_dev.data_buf = usb_dev.data_store[type];
@@ -280,10 +284,10 @@ static void usb_handle_control_transfer(u8_t ep,
 			return;
 		}
 
-		usb_dev.data_buf_residue = setup->wLength;
-		usb_dev.data_buf_len = setup->wLength;
+		usb_dev.data_buf_residue = length;
+		usb_dev.data_buf_len = length;
 
-		if (setup->wLength &&
+		if (length &&
 		    REQTYPE_GET_DIR(setup->bmRequestType)
 		    == REQTYPE_DIR_TO_DEVICE) {
 			return;
@@ -299,8 +303,7 @@ static void usb_handle_control_transfer(u8_t ep,
 		}
 
 		/* Send smallest of requested and offered length */
-		usb_dev.data_buf_residue = min(usb_dev.data_buf_len,
-					       setup->wLength);
+		usb_dev.data_buf_residue = min(usb_dev.data_buf_len, length);
 		/* Send first part (possibly a zero-length status message) */
 		usb_data_to_host();
 	} else if (ep == USB_CONTROL_OUT_EP0) {
@@ -398,8 +401,8 @@ static void usb_register_descriptors(const u8_t *usb_descriptors)
 static bool usb_get_descriptor(u16_t type_index, u16_t lang_id,
 		s32_t *len, u8_t **data)
 {
-	u8_t type = 0;
-	u8_t index = 0;
+	u8_t type = 0U;
+	u8_t index = 0U;
 	u8_t *p = NULL;
 	s32_t cur_index = 0;
 	bool found = false;
@@ -471,8 +474,8 @@ static bool usb_get_descriptor(u16_t type_index, u16_t lang_id,
 static bool usb_set_configuration(u8_t config_index, u8_t alt_setting)
 {
 	u8_t *p = NULL;
-	u8_t cur_config = 0;
-	u8_t cur_alt_setting = 0;
+	u8_t cur_config = 0U;
+	u8_t cur_alt_setting = 0U;
 
 	if (config_index == 0) {
 		/* unconfigure device */
@@ -601,8 +604,10 @@ static bool usb_set_interface(u8_t iface, u8_t alt_setting)
  * @return true if the request was handled successfully
  */
 static bool usb_handle_std_device_req(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data_buf)
+				      s32_t *len, u8_t **data_buf)
 {
+	u16_t value = sys_le16_to_cpu(setup->wValue);
+	u16_t index = sys_le16_to_cpu(setup->wIndex);
 	bool ret = true;
 	u8_t *data = *data_buf;
 
@@ -611,20 +616,19 @@ static bool usb_handle_std_device_req(struct usb_setup_packet *setup,
 		LOG_DBG("REQ_GET_STATUS");
 		/* bit 0: self-powered */
 		/* bit 1: remote wakeup = not supported */
-		data[0] = 0;
-		data[1] = 0;
+		data[0] = 0U;
+		data[1] = 0U;
 		*len = 2;
 		break;
 
 	case REQ_SET_ADDRESS:
-		LOG_DBG("REQ_SET_ADDRESS, addr 0x%x", setup->wValue);
-		usb_dc_set_address(setup->wValue);
+		LOG_DBG("REQ_SET_ADDRESS, addr 0x%x", value);
+		usb_dc_set_address(value);
 		break;
 
 	case REQ_GET_DESCRIPTOR:
 		LOG_DBG("REQ_GET_DESCRIPTOR");
-		ret = usb_get_descriptor(setup->wValue,
-		    setup->wIndex, len, data_buf);
+		ret = usb_get_descriptor(value, index, len, data_buf);
 		break;
 
 	case REQ_GET_CONFIGURATION:
@@ -635,16 +639,16 @@ static bool usb_handle_std_device_req(struct usb_setup_packet *setup,
 		break;
 
 	case REQ_SET_CONFIGURATION:
-		LOG_DBG("REQ_SET_CONFIGURATION, conf 0x%x",
-			    setup->wValue & 0xFF);
-		if (!usb_set_configuration(setup->wValue & 0xFF, 0)) {
+		value &= 0xFF;
+		LOG_DBG("REQ_SET_CONFIGURATION, conf 0x%x", value);
+		if (!usb_set_configuration(value, 0)) {
 			LOG_DBG("USB Set Configuration failed");
 			ret = false;
 		} else {
 			/* configuration successful,
 			 * update current configuration
 			 */
-			usb_dev.configuration = setup->wValue & 0xFF;
+			usb_dev.configuration = value;
 		}
 		break;
 
@@ -654,11 +658,11 @@ static bool usb_handle_std_device_req(struct usb_setup_packet *setup,
 	case REQ_SET_FEATURE:
 		LOG_DBG("REQ_SET_FEATURE");
 
-		if (setup->wValue == FEA_REMOTE_WAKEUP) {
+		if (value == FEA_REMOTE_WAKEUP) {
 			/* put DEVICE_REMOTE_WAKEUP code here */
 		}
 
-		if (setup->wValue == FEA_TEST_MODE) {
+		if (value == FEA_TEST_MODE) {
 			/* put TEST_MODE code here */
 		}
 		ret = false;
@@ -688,15 +692,15 @@ static bool usb_handle_std_device_req(struct usb_setup_packet *setup,
  * @return true if the request was handled successfully
  */
 static bool usb_handle_std_interface_req(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data_buf)
+					 s32_t *len, u8_t **data_buf)
 {
 	u8_t *data = *data_buf;
 
 	switch (setup->bRequest) {
 	case REQ_GET_STATUS:
 		/* no bits specified */
-		data[0] = 0;
-		data[1] = 0;
+		data[0] = 0U;
+		data[1] = 0U;
 		*len = 2;
 		break;
 
@@ -707,13 +711,14 @@ static bool usb_handle_std_interface_req(struct usb_setup_packet *setup,
 
 	case REQ_GET_INTERFACE:
 		/* there is only one interface, return n-1 (= 0) */
-		data[0] = 0;
+		data[0] = 0U;
 		*len = 1;
 		break;
 
 	case REQ_SET_INTERFACE:
 		LOG_DBG("REQ_SET_INTERFACE");
-		usb_set_interface(setup->wIndex, setup->wValue);
+		usb_set_interface(sys_le16_to_cpu(setup->wIndex),
+				  sys_le16_to_cpu(setup->wValue));
 		*len = 0;
 		break;
 
@@ -735,21 +740,21 @@ static bool usb_handle_std_interface_req(struct usb_setup_packet *setup,
  * @return true if the request was handled successfully
  */
 static bool usb_handle_std_endpoint_req(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data_buf)
+					s32_t *len, u8_t **data_buf)
 {
+	u8_t ep = sys_le16_to_cpu(setup->wIndex);
 	u8_t *data = *data_buf;
-	u8_t ep = setup->wIndex;
 
 	switch (setup->bRequest) {
 	case REQ_GET_STATUS:
 		/* bit 0 = endpointed halted or not */
 		usb_dc_ep_is_stalled(ep, &data[0]);
-		data[1] = 0;
+		data[1] = 0U;
 		*len = 2;
 		break;
 
 	case REQ_CLEAR_FEATURE:
-		if (setup->wValue == FEA_ENDPOINT_HALT) {
+		if (sys_le16_to_cpu(setup->wValue) == FEA_ENDPOINT_HALT) {
 			/* clear HALT by unstalling */
 			LOG_INF("... EP clear halt %x", ep);
 			usb_dc_ep_clear_stall(ep);
@@ -762,7 +767,7 @@ static bool usb_handle_std_endpoint_req(struct usb_setup_packet *setup,
 		return false;
 
 	case REQ_SET_FEATURE:
-		if (setup->wValue == FEA_ENDPOINT_HALT) {
+		if (sys_le16_to_cpu(setup->wValue) == FEA_ENDPOINT_HALT) {
 			/* set HALT by stalling */
 			LOG_INF("--- EP SET halt %x", ep);
 			usb_dc_ep_set_stall(ep);
@@ -894,22 +899,26 @@ static void usb_register_status_callback(usb_dc_status_callback cb)
  */
 static int usb_vbus_set(bool on)
 {
-#if defined(USB_VUSB_EN_GPIO)
+#if defined(CONFIG_USB_VBUS_GPIO)
 	int ret = 0;
-	struct device *gpio_dev = device_get_binding(USB_GPIO_DRV_NAME);
+	struct device *gpio_dev;
+
+	gpio_dev = device_get_binding(CONFIG_USB_VBUS_GPIO_DEV_NAME);
 
 	if (!gpio_dev) {
 		LOG_DBG("USB requires GPIO. Cannot find %s!",
-			USB_GPIO_DRV_NAME);
+			CONFIG_USB_VBUS_GPIO_DEV_NAME);
 		return -ENODEV;
 	}
 
 	/* Enable USB IO */
-	ret = gpio_pin_configure(gpio_dev, USB_VUSB_EN_GPIO, GPIO_DIR_OUT);
+	ret = gpio_pin_configure(gpio_dev, CONFIG_USB_VBUS_GPIO_PIN_NUM,
+				 GPIO_DIR_OUT);
 	if (ret)
 		return ret;
 
-	ret = gpio_pin_write(gpio_dev, USB_VUSB_EN_GPIO, on == true ? 1 : 0);
+	ret = gpio_pin_write(gpio_dev, CONFIG_USB_VBUS_GPIO_PIN_NUM,
+			     on == true ? 1 : 0);
 	if (ret)
 		return ret;
 #endif
@@ -1034,7 +1043,7 @@ int usb_enable(struct usb_cfg_data *config)
 		return ret;
 
 	/*register endpoint handlers*/
-	for (i = 0; i < config->num_endpoints; i++) {
+	for (i = 0U; i < config->num_endpoints; i++) {
 		ret = usb_dc_ep_set_callback(config->endpoint[i].ep_addr,
 		    config->endpoint[i].ep_cb);
 		if (ret < 0)
@@ -1042,7 +1051,7 @@ int usb_enable(struct usb_cfg_data *config)
 	}
 
 	/* init transfer slots */
-	for (i = 0; i < MAX_NUM_TRANSFERS; i++) {
+	for (i = 0U; i < MAX_NUM_TRANSFERS; i++) {
 		k_work_init(&usb_dev.transfer[i].work, usb_transfer_work);
 		k_sem_init(&usb_dev.transfer[i].sem, 1, 1);
 	}
@@ -1368,8 +1377,10 @@ static void forward_status_cb(enum usb_dc_status_code status, const u8_t *param)
 	size_t size = (__usb_data_end - __usb_data_start);
 
 	for (size_t i = 0; i < size; i++) {
-		if (__usb_data_start[i].cb_usb_status) {
-			__usb_data_start[i].cb_usb_status(status, param);
+		struct usb_cfg_data *cfg = &__usb_data_start[i];
+
+		if (cfg->cb_usb_status_composite) {
+			cfg->cb_usb_status_composite(cfg, status, param);
 		}
 	}
 }
@@ -1393,13 +1404,15 @@ static int class_handler(struct usb_setup_packet *pSetup,
 	const struct usb_if_descriptor *if_descr;
 	struct usb_interface_cfg_data *iface;
 
-	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest, pSetup->wIndex);
+	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest,
+		sys_le16_to_cpu(pSetup->wIndex));
 
 	for (size_t i = 0; i < size; i++) {
 		iface = &(__usb_data_start[i].interface);
 		if_descr = __usb_data_start[i].interface_descriptor;
 		if ((iface->class_handler) &&
-		    (if_descr->bInterfaceNumber == pSetup->wIndex)) {
+		    (if_descr->bInterfaceNumber ==
+		     sys_le16_to_cpu(pSetup->wIndex))) {
 			return iface->class_handler(pSetup, len, data);
 		}
 	}
@@ -1414,13 +1427,15 @@ static int custom_handler(struct usb_setup_packet *pSetup,
 	const struct usb_if_descriptor *if_descr;
 	struct usb_interface_cfg_data *iface;
 
-	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest, pSetup->wIndex);
+	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest,
+		sys_le16_to_cpu(pSetup->wIndex));
 
 	for (size_t i = 0; i < size; i++) {
 		iface = &(__usb_data_start[i].interface);
 		if_descr = __usb_data_start[i].interface_descriptor;
 		if ((iface->custom_handler) &&
-		    (if_descr->bInterfaceNumber == pSetup->wIndex)) {
+		    (if_descr->bInterfaceNumber ==
+		     sys_le16_to_cpu(pSetup->wIndex))) {
 			return iface->custom_handler(pSetup, len, data);
 		}
 	}
@@ -1432,10 +1447,10 @@ static int vendor_handler(struct usb_setup_packet *pSetup,
 			  s32_t *len, u8_t **data)
 {
 	size_t size = (__usb_data_end - __usb_data_start);
-	const struct usb_if_descriptor *if_descr;
 	struct usb_interface_cfg_data *iface;
 
-	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest, pSetup->wIndex);
+	LOG_DBG("bRequest 0x%x, wIndex 0x%x", pSetup->bRequest,
+		sys_le16_to_cpu(pSetup->wIndex));
 
 	if (usb_os_desc_enabled()) {
 		if (!usb_handle_os_desc_feature(pSetup, len, data)) {
@@ -1445,7 +1460,6 @@ static int vendor_handler(struct usb_setup_packet *pSetup,
 
 	for (size_t i = 0; i < size; i++) {
 		iface = &(__usb_data_start[i].interface);
-		if_descr = __usb_data_start[i].interface_descriptor;
 		if (iface->vendor_handler) {
 			if (!iface->vendor_handler(pSetup, len, data)) {
 				return 0;

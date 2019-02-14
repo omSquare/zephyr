@@ -16,6 +16,7 @@
 #include <toolchain.h>
 #include <linker/sections.h>
 
+#include <spinlock.h>
 #include <kernel_structs.h>
 #include <misc/printk.h>
 #include <sys_clock.h>
@@ -28,9 +29,12 @@
 #include <kswap.h>
 #include <init.h>
 #include <tracing.h>
+#include <stdbool.h>
 
 extern struct _static_thread_data _static_thread_data_list_start[];
 extern struct _static_thread_data _static_thread_data_list_end[];
+
+static struct k_spinlock lock;
 
 #define _FOREACH_STATIC_THREAD(thread_data)              \
 	for (struct _static_thread_data *thread_data =   \
@@ -42,7 +46,7 @@ void k_thread_foreach(k_thread_user_cb_t user_cb, void *user_data)
 {
 #if defined(CONFIG_THREAD_MONITOR)
 	struct k_thread *thread;
-	unsigned int key;
+	k_spinlock_key_t key;
 
 	__ASSERT(user_cb != NULL, "user_cb can not be NULL");
 
@@ -52,15 +56,15 @@ void k_thread_foreach(k_thread_user_cb_t user_cb, void *user_data)
 	 * The indirect ways are through calling k_thread_create and
 	 * k_thread_abort from user_cb.
 	 */
-	key = irq_lock();
+	key = k_spin_lock(&lock);
 	for (thread = _kernel.threads; thread; thread = thread->next_thread) {
 		user_cb(thread, user_data);
 	}
-	irq_unlock(key);
+	k_spin_unlock(&lock, key);
 #endif
 }
 
-int k_is_in_isr(void)
+bool k_is_in_isr(void)
 {
 	return _is_in_isr();
 }
@@ -87,16 +91,17 @@ void _thread_essential_clear(void)
 /*
  * This routine indicates if the current thread is an essential system thread.
  *
- * Returns non-zero if current thread is essential, zero if it is not.
+ * Returns true if current thread is essential, false if it is not.
  */
-int _is_thread_essential(void)
+bool _is_thread_essential(void)
 {
-	return _current->base.user_options & K_ESSENTIAL;
+	return (_current->base.user_options & K_ESSENTIAL) == K_ESSENTIAL;
 }
 
-#if !defined(CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT)
-void k_busy_wait(u32_t usec_to_wait)
+#ifdef CONFIG_SYS_CLOCK_EXISTS
+void _impl_k_busy_wait(u32_t usec_to_wait)
 {
+#if !defined(CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT)
 	/* use 64-bit math to prevent overflow when multiplying */
 	u32_t cycles_to_wait = (u32_t)(
 		(u64_t)usec_to_wait *
@@ -113,8 +118,19 @@ void k_busy_wait(u32_t usec_to_wait)
 			break;
 		}
 	}
+#else
+	z_arch_busy_wait(usec_to_wait);
+#endif /* CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT */
 }
-#endif
+
+#ifdef CONFIG_USERSPACE
+Z_SYSCALL_HANDLER(k_busy_wait, usec_to_wait)
+{
+	_impl_k_busy_wait(usec_to_wait);
+	return 0;
+}
+#endif /* CONFIG_USERSPACE */
+#endif /* CONFIG_SYS_CLOCK_EXISTS */
 
 #ifdef CONFIG_THREAD_CUSTOM_DATA
 void _impl_k_thread_custom_data_set(void *value)
@@ -135,7 +151,7 @@ void *_impl_k_thread_custom_data_get(void)
  */
 void _thread_monitor_exit(struct k_thread *thread)
 {
-	unsigned int key = irq_lock();
+	k_spinlock_key_t key = k_spin_lock(&lock);
 
 	if (thread == _kernel.threads) {
 		_kernel.threads = _kernel.threads->next_thread;
@@ -152,7 +168,7 @@ void _thread_monitor_exit(struct k_thread *thread)
 		}
 	}
 
-	irq_unlock(key);
+	k_spin_unlock(&lock, key);
 }
 #endif
 
@@ -232,7 +248,7 @@ void _check_stack_sentinel(void)
 {
 	u32_t *stack;
 
-	if (_current->base.thread_state & _THREAD_DUMMY) {
+	if ((_current->base.thread_state & _THREAD_DUMMY) != 0) {
 		return;
 	}
 
@@ -248,16 +264,16 @@ void _check_stack_sentinel(void)
 #ifdef CONFIG_MULTITHREADING
 void _impl_k_thread_start(struct k_thread *thread)
 {
-	int key = irq_lock(); /* protect kernel queues */
+	k_spinlock_key_t key = k_spin_lock(&lock); /* protect kernel queues */
 
 	if (_has_thread_started(thread)) {
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 		return;
 	}
 
 	_mark_thread_as_started(thread);
 	_ready_thread(thread);
-	_reschedule(key);
+	_reschedule(&lock, key);
 }
 
 #ifdef CONFIG_USERSPACE
@@ -273,10 +289,8 @@ static void schedule_new_thread(struct k_thread *thread, s32_t delay)
 		k_thread_start(thread);
 	} else {
 		s32_t ticks = _TICK_ALIGN + _ms_to_ticks(delay);
-		int key = irq_lock();
 
 		_add_thread_timeout(thread, ticks);
-		irq_unlock(key);
 	}
 #else
 	ARG_UNUSED(delay);
@@ -360,11 +374,11 @@ void _setup_new_thread(struct k_thread *new_thread,
 	new_thread->entry.parameter2 = p2;
 	new_thread->entry.parameter3 = p3;
 
-	unsigned int key = irq_lock();
+	k_spinlock_key_t key = k_spin_lock(&lock);
 
 	new_thread->next_thread = _kernel.threads;
 	_kernel.threads = new_thread;
-	irq_unlock(key);
+	k_spin_unlock(&lock, key);
 #endif
 #ifdef CONFIG_THREAD_NAME
 	new_thread->name = name;
@@ -376,6 +390,9 @@ void _setup_new_thread(struct k_thread *new_thread,
 
 	/* Any given thread has access to itself */
 	k_object_access_grant(new_thread, new_thread);
+#endif
+#ifdef CONFIG_SCHED_CPU_MASK
+	new_thread->base.cpu_mask = -1;
 #endif
 #ifdef CONFIG_ARCH_HAS_CUSTOM_SWAP_TO_MAIN
 	/* _current may be null if the dummy thread is not used */
@@ -391,7 +408,7 @@ void _setup_new_thread(struct k_thread *new_thread,
 					new_thread);
 	}
 
-	if (options & K_INHERIT_PERMS) {
+	if ((options & K_INHERIT_PERMS) != 0) {
 		_thread_perms_inherit(_current, new_thread);
 	}
 #endif
@@ -517,16 +534,16 @@ void _k_thread_single_suspend(struct k_thread *thread)
 
 void _impl_k_thread_suspend(struct k_thread *thread)
 {
-	unsigned int  key = irq_lock();
+	k_spinlock_key_t key = k_spin_lock(&lock);
 
 	_k_thread_single_suspend(thread);
 
 	sys_trace_thread_suspend(thread);
 
 	if (thread == _current) {
-		(void)_Swap(key);
+		_reschedule(&lock, key);
 	} else {
-		irq_unlock(key);
+		k_spin_unlock(&lock, key);
 	}
 }
 
@@ -542,12 +559,12 @@ void _k_thread_single_resume(struct k_thread *thread)
 
 void _impl_k_thread_resume(struct k_thread *thread)
 {
-	unsigned int  key = irq_lock();
+	k_spinlock_key_t key = k_spin_lock(&lock);
 
 	_k_thread_single_resume(thread);
 
 	sys_trace_thread_resume(thread);
-	_reschedule(key);
+	_reschedule(&lock, key);
 }
 
 #ifdef CONFIG_USERSPACE
@@ -609,8 +626,6 @@ static void grant_static_access(void)
 
 void _init_static_threads(void)
 {
-	unsigned int  key;
-
 	_FOREACH_STATIC_THREAD(thread_data) {
 		_setup_new_thread(
 			thread_data->init_thread,
@@ -630,25 +645,24 @@ void _init_static_threads(void)
 #ifdef CONFIG_USERSPACE
 	grant_static_access();
 #endif
-	_sched_lock();
 
 	/*
-	 * Non-legacy static threads may be started immediately or after a
-	 * previously specified delay. Even though the scheduler is locked,
-	 * ticks can still be delivered and processed. Lock interrupts so
-	 * that the countdown until execution begins from the same tick.
+	 * Non-legacy static threads may be started immediately or
+	 * after a previously specified delay. Even though the
+	 * scheduler is locked, ticks can still be delivered and
+	 * processed. Take a sched lock to prevent them from running
+	 * until they are all started.
 	 *
 	 * Note that static threads defined using the legacy API have a
 	 * delay of K_FOREVER.
 	 */
-	key = irq_lock();
+	k_sched_lock();
 	_FOREACH_STATIC_THREAD(thread_data) {
 		if (thread_data->init_delay != K_FOREVER) {
 			schedule_new_thread(thread_data->init_thread,
 					    thread_data->init_delay);
 		}
 	}
-	irq_unlock(key);
 	k_sched_unlock();
 }
 #endif
@@ -670,25 +684,6 @@ void _init_thread_base(struct _thread_base *thread_base, int priority,
 	_init_thread_timeout(thread_base);
 }
 
-void k_thread_access_grant(struct k_thread *thread, ...)
-{
-#ifdef CONFIG_USERSPACE
-	va_list args;
-	va_start(args, thread);
-
-	while (true) {
-		void *object = va_arg(args, void *);
-		if (object == NULL) {
-			break;
-		}
-		k_object_access_grant(object, thread);
-	}
-	va_end(args);
-#else
-	ARG_UNUSED(thread);
-#endif
-}
-
 FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
 					    void *p1, void *p2, void *p3)
 {
@@ -707,3 +702,28 @@ FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
 	_thread_entry(entry, p1, p2, p3);
 #endif
 }
+
+/* These spinlock assertion predicates are defined here because having
+ * them in spinlock.h is a giant header ordering headache.
+ */
+#ifdef SPIN_VALIDATE
+int z_spin_lock_valid(struct k_spinlock *l)
+{
+	if (l->thread_cpu) {
+		if ((l->thread_cpu & 3) == _current_cpu->id) {
+			return 0;
+		}
+	}
+	l->thread_cpu = _current_cpu->id | (u32_t)_current;
+	return 1;
+}
+
+int z_spin_unlock_valid(struct k_spinlock *l)
+{
+	if (l->thread_cpu != (_current_cpu->id | (u32_t)_current)) {
+		return 0;
+	}
+	l->thread_cpu = 0;
+	return 1;
+}
+#endif

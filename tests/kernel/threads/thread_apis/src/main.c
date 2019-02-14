@@ -16,6 +16,7 @@
 #include <ztest.h>
 #include <kernel_structs.h>
 #include <kernel.h>
+#include <kernel_internal.h>
 #include <string.h>
 
 extern void test_threads_spawn_params(void);
@@ -33,16 +34,18 @@ extern void test_essential_thread_operation(void);
 extern void test_threads_priority_set(void);
 extern void test_delayed_thread_abort(void);
 extern void test_k_thread_foreach(void);
+extern void test_threads_cpu_mask(void);
 
-__kernel struct k_thread tdata;
+struct k_thread tdata;
 #define STACK_SIZE (256 + CONFIG_TEST_EXTRA_STACKSIZE)
 K_THREAD_STACK_DEFINE(tstack, STACK_SIZE);
+size_t tstack_size = K_THREAD_STACK_SIZEOF(tstack);
 
 /*local variables*/
 static K_THREAD_STACK_DEFINE(tstack_custom, STACK_SIZE);
 static K_THREAD_STACK_DEFINE(tstack_name, STACK_SIZE);
-__kernel static struct k_thread tdata_custom;
-__kernel static struct k_thread tdata_name;
+static struct k_thread tdata_custom;
+static struct k_thread tdata_name;
 
 static int main_prio;
 
@@ -73,7 +76,7 @@ static void thread_name_entry(void)
 
 static void customdata_entry(void *p1, void *p2, void *p3)
 {
-	u32_t data = 1;
+	u32_t data = 1U;
 
 	zassert_is_null(k_thread_custom_data_get(), NULL);
 	while (1) {
@@ -200,8 +203,8 @@ void test_user_mode(void)
 
 void test_main(void)
 {
-	k_thread_access_grant(k_current_get(), &tdata, tstack, NULL);
-	k_thread_access_grant(k_current_get(), &tdata_custom, tstack_custom, NULL);
+	k_thread_access_grant(k_current_get(), &tdata, tstack);
+	k_thread_access_grant(k_current_get(), &tdata_custom, tstack_custom);
 	main_prio = k_thread_priority_get(k_current_get());
 
 	ztest_test_suite(threads_lifecycle,
@@ -225,7 +228,8 @@ void test_main(void)
 			 ztest_user_unit_test(test_customdata_get_set_preempt),
 			 ztest_unit_test(test_k_thread_foreach),
 			 ztest_unit_test(test_thread_name_get_set),
-			 ztest_unit_test(test_user_mode)
+			 ztest_unit_test(test_user_mode),
+			 ztest_unit_test(test_threads_cpu_mask)
 			 );
 
 	ztest_run_test_suite(threads_lifecycle);

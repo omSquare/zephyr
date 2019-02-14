@@ -87,9 +87,6 @@ SECTIONS
     SECTION_PROLOGUE(_TEXT_SECTION_NAME,,)
 	{
 		. = ALIGN(4);
-#ifdef CONFIG_GEN_SW_ISR_TABLE
-		KEEP(*(SW_ISR_TABLE))
-#endif
 		KEEP(*(.openocd_debug))
 		KEEP(*(".openocd_debug.*"))
 
@@ -107,6 +104,8 @@ SECTIONS
     SECTION_PROLOGUE(_RODATA_SECTION_NAME,,)
 	{
 		 . = ALIGN(4);
+		 *(.srodata)
+		 *(".srodata.*")
 		 *(.rodata)
 		 *(".rodata.*")
 		 *(.gnu.linkonce.r.*)

@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_MODULE_NAME net_test
-#define NET_LOG_LEVEL CONFIG_NET_CONTEXT_LOG_LEVEL
+#include <logging/log.h>
+LOG_MODULE_REGISTER(net_test, CONFIG_NET_CONTEXT_LOG_LEVEL);
 
 #include <zephyr/types.h>
 #include <ztest.h>
@@ -21,6 +21,7 @@
 #include <tc_util.h>
 
 #include <net/ethernet.h>
+#include <net/dummy.h>
 #include <net/buf.h>
 #include <net/net_ip.h>
 #include <net/net_if.h>
@@ -87,7 +88,7 @@ static void net_ctx_get_fail(void)
 	zassert_equal(ret, -EPROTONOSUPPORT,
 		      "Invalid context protocol test failed");
 
-	ret = net_context_get(1, SOCK_DGRAM, IPPROTO_UDP, &context);
+	ret = net_context_get(99, SOCK_DGRAM, IPPROTO_UDP, &context);
 	zassert_equal(ret, -EAFNOSUPPORT,
 		      "Invalid context family test failed");
 
@@ -507,6 +508,8 @@ static void net_ctx_sendto_v4(void)
 
 static void recv_cb(struct net_context *context,
 		    struct net_pkt *pkt,
+		    union net_ip_header *ip_hdr,
+		    union net_proto_header *proto_hdr,
 		    int status,
 		    void *user_data)
 {
@@ -682,6 +685,8 @@ static void net_ctx_recv_v4_again(void)
 
 static void recv_cb_another(struct net_context *context,
 			    struct net_pkt *pkt,
+			    union net_ip_header *ip_hdr,
+			    union net_proto_header *proto_hdr,
 			    int status,
 			    void *user_data)
 {
@@ -737,6 +742,8 @@ static struct k_thread thread_data;
 
 static void recv_cb_timeout(struct net_context *context,
 			    struct net_pkt *pkt,
+			    union net_ip_header *ip_hdr,
+			    union net_proto_header *proto_hdr,
 			    int status,
 			    void *user_data)
 {
@@ -765,7 +772,7 @@ void timeout_thread(struct net_context *ctx, void *param2, void *param3)
 		return;
 	}
 
-	if (recv_cb_timeout_called) {
+	if (!recv_cb_timeout_called) {
 		DBG("Data received on time, recv test failed\n");
 		cb_failure = true;
 		return;
@@ -968,7 +975,7 @@ static void net_context_iface_init(struct net_if *iface)
 			     NET_LINK_ETHERNET);
 }
 
-static int tester_send(struct net_if *iface, struct net_pkt *pkt)
+static int tester_send(struct device *dev, struct net_pkt *pkt)
 {
 	struct net_udp_hdr hdr, *udp_hdr;
 
@@ -1019,7 +1026,8 @@ static int tester_send(struct net_if *iface, struct net_pkt *pkt)
 		udp_hdr->dst_port = port;
 		net_udp_set_hdr(pkt, udp_hdr);
 
-		if (net_recv_data(iface, pkt) < 0) {
+		if (net_recv_data(net_pkt_iface(pkt),
+				  net_pkt_clone(pkt, K_NO_WAIT)) < 0) {
 			TC_ERROR("Data receive failed.");
 			goto out;
 		}
@@ -1030,8 +1038,6 @@ static int tester_send(struct net_if *iface, struct net_pkt *pkt)
 	}
 
 out:
-	net_pkt_unref(pkt);
-
 	if (data_failure) {
 		test_failed = true;
 	}
@@ -1041,8 +1047,8 @@ out:
 
 struct net_context_test net_context_data;
 
-static struct net_if_api net_context_if_api = {
-	.init = net_context_iface_init,
+static struct dummy_api net_context_if_api = {
+	.iface_api.init = net_context_iface_init,
 	.send = tester_send,
 };
 

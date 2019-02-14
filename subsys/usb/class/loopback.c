@@ -15,7 +15,7 @@
 
 #define LOG_LEVEL CONFIG_USB_DEVICE_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(usb_loopback)
+LOG_MODULE_REGISTER(usb_loopback);
 
 #define LOOPBACK_OUT_EP_ADDR		0x01
 #define LOOPBACK_IN_EP_ADDR		0x81
@@ -36,7 +36,7 @@ struct usb_loopback_config {
 	struct usb_ep_descriptor if0_in_ep;
 } __packed;
 
-USBD_CLASS_DESCR_DEFINE(primary) struct usb_loopback_config loopback_cfg = {
+USBD_CLASS_DESCR_DEFINE(primary, 0) struct usb_loopback_config loopback_cfg = {
 	/* Interface descriptor 0 */
 	.if0 = {
 		.bLength = sizeof(struct usb_if_descriptor),
@@ -158,8 +158,11 @@ static int loopback_vendor_handler(struct usb_setup_packet *setup,
 }
 /* usb.rst vendor handler end */
 
-static void loopback_interface_config(u8_t bInterfaceNumber)
+static void loopback_interface_config(struct usb_desc_header *head,
+				      u8_t bInterfaceNumber)
 {
+	ARG_UNUSED(head);
+
 	loopback_cfg.if0.bInterfaceNumber = bInterfaceNumber;
 }
 

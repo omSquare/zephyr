@@ -39,7 +39,7 @@ struct net_eth_addr {
 	u8_t addr[6];
 };
 
-#define NET_ETH_HDR(pkt) ((struct net_eth_hdr *)net_pkt_ll(pkt))
+#define NET_ETH_HDR(pkt) ((struct net_eth_hdr *)net_pkt_data(pkt))
 
 #define NET_ETH_PTYPE_ARP		0x0806
 #define NET_ETH_PTYPE_IP		0x0800
@@ -47,6 +47,23 @@ struct net_eth_addr {
 #define NET_ETH_PTYPE_VLAN		0x8100
 #define NET_ETH_PTYPE_PTP		0x88f7
 #define NET_ETH_PTYPE_LLDP		0x88cc
+#define NET_ETH_PTYPE_ALL               0x0003 /* from linux/if_ether.h */
+
+#if !defined(ETH_P_ALL)
+#define ETH_P_ALL	NET_ETH_PTYPE_ALL
+#endif
+#if !defined(ETH_P_IP)
+#define ETH_P_IP	NET_ETH_PTYPE_IP
+#endif
+#if !defined(ETH_P_ARP)
+#define ETH_P_ARP	NET_ETH_PTYPE_ARP
+#endif
+#if !defined(ETH_P_IPV6)
+#define ETH_P_IPV6	NET_ETH_PTYPE_IPV6
+#endif
+#if !defined(ETH_P_8021Q)
+#define ETH_P_8021Q	NET_ETH_PTYPE_VLAN
+#endif
 
 #define NET_ETH_MINIMAL_FRAME_SIZE	60
 
@@ -218,6 +235,9 @@ struct ethernet_api {
 	/** Return ptp_clock device that is tied to this ethernet device */
 	struct device *(*get_ptp_clock)(struct device *dev);
 #endif /* CONFIG_PTP_CLOCK */
+
+	/** Send a network packet */
+	int (*send)(struct device *dev, struct net_pkt *pkt);
 };
 
 struct net_eth_hdr {
@@ -534,23 +554,6 @@ static inline bool net_eth_get_vlan_status(struct net_if *iface)
 	return false;
 }
 #endif /* CONFIG_NET_VLAN */
-
-/**
- * @brief Fill ethernet header in network packet.
- *
- * @param ctx Ethernet context
- * @param pkt Network packet
- * @param ptype Upper level protocol type (in network byte order)
- * @param src Source ethernet address
- * @param dst Destination ethernet address
- *
- * @return Pointer to ethernet header struct inside net_buf.
- */
-struct net_eth_hdr *net_eth_fill_header(struct ethernet_context *ctx,
-					struct net_pkt *pkt,
-					u32_t ptype,
-					u8_t *src,
-					u8_t *dst);
 
 /**
  * @brief Inform ethernet L2 driver that ethernet carrier is detected.

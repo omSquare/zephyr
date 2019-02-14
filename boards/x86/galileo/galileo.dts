@@ -20,6 +20,7 @@
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,console = &uart1;
+		zephyr,shell-uart = &uart1;
 	};
 };
 
@@ -39,5 +40,9 @@
 };
 
 &spi0 {
+	status = "ok";
+};
+
+&sharedirq0 {
 	status = "ok";
 };

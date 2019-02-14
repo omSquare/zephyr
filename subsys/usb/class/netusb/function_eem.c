@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_LEVEL CONFIG_USB_DEVICE_NETWORK_DEBUG_LEVEL
+#define LOG_LEVEL CONFIG_USB_DEVICE_NETWORK_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(usb_eem)
+LOG_MODULE_REGISTER(usb_eem);
 
 #include <net_private.h>
 #include <zephyr.h>
@@ -27,7 +27,7 @@ struct usb_cdc_eem_config {
 	struct usb_ep_descriptor if0_out_ep;
 } __packed;
 
-USBD_CLASS_DESCR_DEFINE(primary) struct usb_cdc_eem_config cdc_eem_cfg = {
+USBD_CLASS_DESCR_DEFINE(primary, 0) struct usb_cdc_eem_config cdc_eem_cfg = {
 	/* Interface descriptor 0 */
 	/* CDC Communication interface */
 	.if0 = {
@@ -107,15 +107,11 @@ static int eem_send(struct net_pkt *pkt)
 	/* With EEM, it's possible to send multiple ethernet packets in one
 	 * transfer, we don't do that for now.
 	 */
-	len = net_pkt_ll_reserve(pkt) + net_pkt_get_len(pkt) + sizeof(sentinel);
+	len = net_pkt_get_len(pkt) + sizeof(sentinel);
 
 	/* Add EEM header */
 	*hdr = sys_cpu_to_le16(0x3FFF & len);
 	b_idx += sizeof(u16_t);
-
-	/* Add Ethernet Header */
-	memcpy(&tx_buf[b_idx], net_pkt_ll(pkt), net_pkt_ll_reserve(pkt));
-	b_idx += net_pkt_ll_reserve(pkt);
 
 	/* generate transfer buffer */
 	for (frag = pkt->frags; frag; frag = frag->frags) {
@@ -177,7 +173,7 @@ static void eem_read_cb(u8_t ep, int size, void *priv)
 			break;
 		}
 
-		pkt = net_pkt_get_reserve_rx(0, K_FOREVER);
+		pkt = net_pkt_get_reserve_rx(K_FOREVER);
 		if (!pkt) {
 			LOG_ERR("Unable to alloc pkt\n");
 			break;
@@ -262,6 +258,9 @@ static void eem_status_cb(enum usb_dc_status_code status, const u8_t *param)
 		LOG_DBG("USB unhandlded state: %d", status);
 		break;
 
+	case USB_DC_SOF:
+		break;
+
 	case USB_DC_UNKNOWN:
 	default:
 		LOG_DBG("USB unknown state: %d", status);
@@ -269,8 +268,11 @@ static void eem_status_cb(enum usb_dc_status_code status, const u8_t *param)
 	}
 }
 
-static void eem_interface_config(u8_t bInterfaceNumber)
+static void eem_interface_config(struct usb_desc_header *head,
+				 u8_t bInterfaceNumber)
 {
+	ARG_UNUSED(head);
+
 	cdc_eem_cfg.if0.bInterfaceNumber = bInterfaceNumber;
 }
 

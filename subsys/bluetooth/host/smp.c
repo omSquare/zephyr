@@ -959,7 +959,7 @@ static void smp_br_distribute_keys(struct bt_smp_br *smp)
 		if (atomic_test_bit(smp->flags, SMP_FLAG_BOND)) {
 			bt_keys_add_type(keys, BT_KEYS_LOCAL_CSRK);
 			memcpy(keys->local_csrk.val, info->csrk, 16);
-			keys->local_csrk.cnt = 0;
+			keys->local_csrk.cnt = 0U;
 		}
 
 		smp_br_send(smp, buf, sign_info_sent);
@@ -1299,7 +1299,7 @@ static int smp_br_error(struct bt_smp_br *smp, u8_t reason)
 static int bt_smp_br_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 {
 	struct bt_smp_br *smp = CONTAINER_OF(chan, struct bt_smp_br, chan);
-	struct bt_smp_hdr *hdr = (void *)buf->data;
+	struct bt_smp_hdr *hdr;
 	u8_t err;
 
 	if (buf->len < sizeof(*hdr)) {
@@ -1307,9 +1307,8 @@ static int bt_smp_br_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		return 0;
 	}
 
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	BT_DBG("Received SMP code 0x%02x len %u", hdr->code, buf->len);
-
-	net_buf_pull(buf, sizeof(*hdr));
 
 	/*
 	 * If SMP timeout occurred "no further SMP commands shall be sent over
@@ -1671,7 +1670,7 @@ static u8_t smp_send_pairing_confirm(struct bt_smp *smp)
 	switch (smp->method) {
 	case PASSKEY_CONFIRM:
 	case JUST_WORKS:
-		r = 0;
+		r = 0U;
 		break;
 	case PASSKEY_DISPLAY:
 	case PASSKEY_INPUT:
@@ -1843,7 +1842,7 @@ static void bt_smp_distribute_keys(struct bt_smp *smp)
 		if (atomic_test_bit(smp->flags, SMP_FLAG_BOND)) {
 			bt_keys_add_type(keys, BT_KEYS_LOCAL_CSRK);
 			memcpy(keys->local_csrk.val, info->csrk, 16);
-			keys->local_csrk.cnt = 0;
+			keys->local_csrk.cnt = 0U;
 		}
 
 		smp_send(smp, buf, sign_info_sent);
@@ -2878,7 +2877,7 @@ static u8_t sc_smp_check_confirm(struct bt_smp *smp)
 	switch (smp->method) {
 	case PASSKEY_CONFIRM:
 	case JUST_WORKS:
-		r = 0;
+		r = 0U;
 		break;
 	case PASSKEY_DISPLAY:
 	case PASSKEY_INPUT:
@@ -3299,7 +3298,7 @@ static u8_t display_passkey(struct bt_smp *smp)
 		smp->passkey %= 1000000;
 	}
 
-	smp->passkey_round = 0;
+	smp->passkey_round = 0U;
 
 	if (bt_auth && bt_auth->passkey_display) {
 		atomic_set_bit(smp->flags, SMP_FLAG_DISPLAY);
@@ -3513,7 +3512,7 @@ static const struct {
 static int bt_smp_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 {
 	struct bt_smp *smp = CONTAINER_OF(chan, struct bt_smp, chan);
-	struct bt_smp_hdr *hdr = (void *)buf->data;
+	struct bt_smp_hdr *hdr;
 	u8_t err;
 
 	if (buf->len < sizeof(*hdr)) {
@@ -3521,9 +3520,8 @@ static int bt_smp_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		return 0;
 	}
 
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	BT_DBG("Received SMP code 0x%02x len %u", hdr->code, buf->len);
-
-	net_buf_pull(buf, sizeof(*hdr));
 
 	/*
 	 * If SMP timeout occurred "no further SMP commands shall be sent over
@@ -3713,7 +3711,7 @@ static void bt_smp_encrypt_change(struct bt_l2cap_chan *chan,
 	}
 }
 
-#if defined(CONFIG_BT_SIGNING)
+#if defined(CONFIG_BT_SIGNING) || defined(CONFIG_BT_SMP_SELFTEST)
 /* Sign message using msg as a buffer, len is a size of the message,
  * msg buffer contains message itself, 32 bit count and signature,
  * so total buffer size is len + 4 + 8 octets.
@@ -3751,7 +3749,9 @@ static int smp_sign_buf(const u8_t *key, u8_t *msg, u16_t len)
 
 	return 0;
 }
+#endif
 
+#if defined(CONFIG_BT_SIGNING)
 int bt_smp_sign_verify(struct bt_conn *conn, struct net_buf *buf)
 {
 	struct bt_keys *keys;
@@ -4434,7 +4434,7 @@ int bt_passkey_set(unsigned int passkey)
 	fixed_passkey = passkey;
 	return 0;
 }
-#endif /* CONFIG_SMP_FIXED_PASSKEY */
+#endif /* CONFIG_BT_FIXED_PASSKEY */
 
 void bt_smp_update_keys(struct bt_conn *conn)
 {

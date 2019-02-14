@@ -31,13 +31,10 @@ const NANO_ESF _default_esf = {
 	0xdeadbaad,
 	0xdeadbaad,
 	0xdeadbaad,
-#if defined(CONFIG_SOC_RISCV32_PULPINO)
-	0xdeadbaad,
-	0xdeadbaad,
-	0xdeadbaad,
-	0xdeadbaad,
-	0xdeadbaad,
-	0xdeadbaad,
+#if defined(CONFIG_RISCV_SOC_CONTEXT_SAVE)
+	{
+		SOC_ESF_INIT,
+	},
 #endif
 };
 
@@ -169,7 +166,6 @@ hang_system:
 }
 
 
-#ifdef CONFIG_PRINTK
 static char *cause_str(u32_t cause)
 {
 	switch (cause) {
@@ -189,7 +185,6 @@ static char *cause_str(u32_t cause)
 		return "unknown";
 	}
 }
-#endif
 
 
 FUNC_NORETURN void _Fault(const NANO_ESF *esf)
@@ -199,7 +194,6 @@ FUNC_NORETURN void _Fault(const NANO_ESF *esf)
 	__asm__ volatile("csrr %0, mcause" : "=r" (mcause));
 
 	mcause &= SOC_MCAUSE_EXP_MASK;
-
 	printk("Exception cause %s (%d)\n", cause_str(mcause), (int)mcause);
 
 	_NanoFatalErrorHandler(_NANO_ERR_CPU_EXCEPTION, esf);

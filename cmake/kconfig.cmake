@@ -2,7 +2,6 @@
 # conf/mconf needs to be run from a different directory because of: GH-3408
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/kconfig/include/generated)
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/kconfig/include/config)
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/include/generated)
 
 if(KCONFIG_ROOT)
   # KCONFIG_ROOT has either been specified as a CMake variable or is
@@ -23,22 +22,31 @@ endif()
 set(ENV{srctree}            ${ZEPHYR_BASE})
 set(ENV{KERNELVERSION}      ${KERNELVERSION})
 set(ENV{KCONFIG_CONFIG}     ${DOTCONFIG})
+set(ENV{PYTHON_EXECUTABLE} ${PYTHON_EXECUTABLE})
 
 # Set environment variables so that Kconfig can prune Kconfig source
 # files for other architectures
 set(ENV{ARCH}      ${ARCH})
 set(ENV{BOARD_DIR} ${BOARD_DIR})
 set(ENV{SOC_DIR}   ${SOC_DIR})
+set(ENV{PROJECT_BINARY_DIR} ${PROJECT_BINARY_DIR})
+set(ENV{ARCH_DIR}   ${ARCH_DIR})
+set(ENV{GENERATED_DTS_BOARD_CONF} ${GENERATED_DTS_BOARD_CONF})
 
 add_custom_target(
   menuconfig
   ${CMAKE_COMMAND} -E env
+  PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}
   srctree=${ZEPHYR_BASE}
   KERNELVERSION=${KERNELVERSION}
   KCONFIG_CONFIG=${DOTCONFIG}
   ARCH=$ENV{ARCH}
   BOARD_DIR=$ENV{BOARD_DIR}
   SOC_DIR=$ENV{SOC_DIR}
+  PROJECT_BINARY_DIR=$ENV{PROJECT_BINARY_DIR}
+  ZEPHYR_TOOLCHAIN_VARIANT=${ZEPHYR_TOOLCHAIN_VARIANT}
+  ARCH_DIR=$ENV{ARCH_DIR}
+  GENERATED_DTS_BOARD_CONF=$ENV{GENERATED_DTS_BOARD_CONF}
   ${PYTHON_EXECUTABLE} ${ZEPHYR_BASE}/scripts/kconfig/menuconfig.py ${KCONFIG_ROOT}
   WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/kconfig
   USES_TERMINAL
@@ -164,5 +172,24 @@ endforeach()
 
 add_custom_target(config-sanitycheck DEPENDS ${DOTCONFIG})
 
+# Remove the CLI Kconfig symbols from the namespace and
+# CMakeCache.txt. If the symbols end up in DOTCONFIG they will be
+# re-introduced to the namespace through 'import_kconfig'.
+foreach (name ${cache_variable_names})
+  if("${name}" MATCHES "^CONFIG_")
+    unset(${name})
+    unset(${name} CACHE)
+  endif()
+endforeach()
+
 # Parse the lines prefixed with CONFIG_ in the .config file from Kconfig
-import_kconfig(${DOTCONFIG})
+import_kconfig(CONFIG_ ${DOTCONFIG})
+
+# Re-introduce the CLI Kconfig symbols that survived
+foreach (name ${cache_variable_names})
+  if("${name}" MATCHES "^CONFIG_")
+    if(DEFINED ${name})
+      set(${name} ${${name}} CACHE STRING "")
+    endif()
+  endif()
+endforeach()

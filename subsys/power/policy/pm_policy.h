@@ -37,7 +37,7 @@ extern void sys_pm_resume_devices(void);
 /**
  * @brief Function to get the next PM state based on the ticks
  */
-extern int sys_pm_policy_next_state(s32_t ticks, enum power_states *state);
+extern enum power_states sys_pm_policy_next_state(s32_t ticks);
 
 /**
  * @brief Application defined function for Lower Power entry
@@ -54,13 +54,6 @@ extern void sys_pm_notify_lps_entry(enum power_states state);
  * for low power exit.
  */
 extern void sys_pm_notify_lps_exit(enum power_states state);
-
-/**
- * @brief Dump Low Power states related debug info
- *
- * Dump Low Power states debug info like LPS entry count and residencies.
- */
-extern void sys_pm_dump_debug_info(void);
 
 #ifdef __cplusplus
 }

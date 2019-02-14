@@ -81,26 +81,28 @@
 
 #if __ASSERT_ON
 #include <misc/printk.h>
+void assert_post_action(void);
 
-#if defined(CONFIG_ARCH_POSIX)
-extern void posix_exit(int exit_code);
-#define __ASSERT_POST posix_exit(1)
-#else
-#define __ASSERT_POST             \
-	for (;;) {                \
-		/* spin thread */ \
-	}
-#endif
+#define __ASSERT_LOC(test)                               \
+	printk("ASSERTION FAIL [%s] @ %s:%d\n",    \
+	       _STRINGIFY(test),                         \
+	       __FILE__,                                 \
+	       __LINE__)                                 \
+
+#define __ASSERT_NO_MSG(test)                                            \
+	do {                                                             \
+		if (!(test)) {                                           \
+			__ASSERT_LOC(test);                              \
+			assert_post_action();                            \
+		}                                                        \
+	} while (false)
 
 #define __ASSERT(test, fmt, ...)                                         \
 	do {                                                             \
 		if (!(test)) {                                           \
-			(void)printk("ASSERTION FAIL [%s] @ %s:%d:\n\t", \
-			       _STRINGIFY(test),                         \
-			       __FILE__,                                 \
-			       __LINE__);                                \
-			(void)printk(fmt, ##__VA_ARGS__);                \
-			__ASSERT_POST;                                   \
+			__ASSERT_LOC(test);                              \
+			printk("\t" fmt "\n", ##__VA_ARGS__);            \
+			assert_post_action();                            \
 		}                                                        \
 	} while (false)
 
@@ -114,18 +116,14 @@ extern void posix_exit(int exit_code);
 #warning "__ASSERT() statements are ENABLED"
 #endif
 #else
-#define __ASSERT(test, fmt, ...) \
-	do {/* nothing */        \
-	} while (false)
+#define __ASSERT(test, fmt, ...) { }
 #define __ASSERT_EVAL(expr1, expr2, test, fmt, ...) expr1
+#define __ASSERT_NO_MSG(test) { }
 #endif
 #else
-#define __ASSERT(test, fmt, ...) \
-	do {/* nothing */        \
-	} while (false)
+#define __ASSERT(test, fmt, ...) { }
 #define __ASSERT_EVAL(expr1, expr2, test, fmt, ...) expr1
+#define __ASSERT_NO_MSG(test) { }
 #endif
-
-#define __ASSERT_NO_MSG(test) __ASSERT(test, "")
 
 #endif /* ZEPHYR_INCLUDE_MISC___ASSERT_H_ */

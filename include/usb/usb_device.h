@@ -50,8 +50,8 @@ extern "C" {
  */
 #define USBD_DEVICE_DESCR_DEFINE(p) \
 	static __in_section(usb, descriptor_##p, 0) __used
-#define USBD_CLASS_DESCR_DEFINE(p) \
-	static __in_section(usb, descriptor_##p, 1) __used
+#define USBD_CLASS_DESCR_DEFINE(p, instance) \
+	static __in_section(usb, descriptor_##p.1, instance) __used
 #define USBD_MISC_DESCR_DEFINE(p) \
 	static __in_section(usb, descriptor_##p, 2) __used
 #define USBD_USER_DESCR_DEFINE(p) \
@@ -116,7 +116,8 @@ typedef int (*usb_request_handler)(struct usb_setup_packet *setup,
 /**
  * @brief Function for interface runtime configuration
  */
-typedef void (*usb_interface_config)(u8_t bInterfaceNumber);
+typedef void (*usb_interface_config)(struct usb_desc_header *head,
+				     u8_t bInterfaceNumber);
 
 /**
  * @brief USB Endpoint Configuration
@@ -190,6 +191,11 @@ struct usb_cfg_data {
 	usb_interface_config interface_config;
 	/** Callback to be notified on USB connection status change */
 	usb_dc_status_callback cb_usb_status;
+	/** Composite callback */
+	void (*cb_usb_status_composite)(struct usb_cfg_data *cfg,
+					enum usb_dc_status_code cb_status,
+					const u8_t *param);
+
 	/** USB interface (Class) handler and storage space */
 	struct usb_interface_cfg_data interface;
 	/** Number of individual endpoints in the device configuration */

@@ -14,6 +14,7 @@
 #define _LINKER
 #define _ASMLANGUAGE
 
+#include <generated_dts_board.h>
 #include <autoconf.h>
 #include <linker/sections.h>
 #include <linker/linker-defs.h>
@@ -169,7 +170,6 @@ SECTIONS
     *(.gnu.linkonce.s2.*)
     KEEP(*(.jcr))
     *(.dram1 .dram1.*)
-    KEEP(*(SW_ISR_TABLE))
     _data_end = ABSOLUTE(.);
     . = ALIGN(4);
   } GROUP_LINK_IN(RAMABLE_REGION)

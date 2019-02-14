@@ -7,6 +7,8 @@
 #ifndef _SOC_POWER_H_
 #define _SOC_POWER_H_
 
+#include <power.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,16 +21,14 @@ extern "C" {
  */
 #define GP0_BIT_SLEEP_READY BIT(0)
 
-enum power_states {
-	SYS_POWER_STATE_CPU_LPS,       /* C1 state */
-	SYS_POWER_STATE_CPU_LPS_1,     /* C2 state */
-	SYS_POWER_STATE_CPU_LPS_2,     /* C2LP state */
-	SYS_POWER_STATE_DEEP_SLEEP,    /* SLEEP state */
-	SYS_POWER_STATE_DEEP_SLEEP_1,  /* SLEEP state with LPMODE enabled */
-	SYS_POWER_STATE_DEEP_SLEEP_2,  /* Not Supported */
-
-	SYS_POWER_STATE_MAX
-};
+/*
+ * Power state map:
+ * SYS_POWER_STATE_CPU_LPS:		C1 state
+ * SYS_POWER_STATE_CPU_LPS_1:		C2 state
+ * SYS_POWER_STATE_CPU_LPS_2:		C2LP state
+ * SYS_POWER_STATE_DEEP_SLEEP:		SLEEP state
+ * SYS_POWER_STATE_DEEP_SLEEP_1:	SLEEP state with LPMODE enabled
+ */
 
 /**
  * @brief Put processor into low power state
@@ -53,7 +53,7 @@ enum power_states {
  * SYS_POWER_STATE_DEEP_SLEEP_1: Only Always-On peripherals can wake up
  * the SoC. This consists of the Counter, RTC, GPIO 1 and AIO Comparator.
  */
-void _sys_soc_set_power_state(enum power_states state);
+void sys_set_power_state(enum power_states state);
 
 /**
  * @brief Do any SoC or architecture specific post ops after low power states.
@@ -63,7 +63,7 @@ void _sys_soc_set_power_state(enum power_states state);
  * interrupts after resuming from deep sleep. In future, the enabling
  * of interrupts may be moved into the kernel.
  */
-void _sys_soc_power_state_post_ops(enum power_states state);
+void sys_power_state_post_ops(enum power_states state);
 
 /**
  * @brief Check if ARC core is ready to enter in DEEP_SLEEP states.
@@ -71,7 +71,7 @@ void _sys_soc_power_state_post_ops(enum power_states state);
  * @retval true If ARC is ready.
  * @retval false Otherwise.
  */
-bool _sys_soc_power_state_is_arc_ready(void);
+bool sys_power_state_is_arc_ready(void);
 
 #ifdef __cplusplus
 }

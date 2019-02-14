@@ -20,7 +20,7 @@
 #include <sys_clock.h>
 
 /* RTC registers. */
-#define RTC0 ((RtcMode0 *) CONFIG_RTC_SAM0_BASE_ADDRESS)
+#define RTC0 ((RtcMode0 *) DT_RTC_SAM0_BASE_ADDRESS)
 
 /* Number of sys timer cycles per on tick. */
 #define CYCLES_PER_TICK (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC \
@@ -38,6 +38,10 @@
  */
 #define TICK_THRESHOLD 7
 
+BUILD_ASSERT_MSG(CYCLES_PER_TICK > TICK_THRESHOLD,
+		 "CYCLES_PER_TICK must be greater than TICK_THRESHOLD for "
+		 "tickless mode");
+
 #else /* !CONFIG_TICKLESS_KERNEL */
 
 /*
@@ -45,10 +49,8 @@
  * MATCHCLR == 1 and PRESCALER == 0. So we need to check that CYCLES_PER_TICK
  * is more than one.
  */
-#if CYCLES_PER_TICK < 2
-#error unsupported configuration for ticking mode; CYCLES_PER_TICK must be \
-	greater than 2
-#endif
+BUILD_ASSERT_MSG(CYCLES_PER_TICK > 1,
+		 "CYCLES_PER_TICK must be greater than 1 for ticking mode");
 
 #endif /* CONFIG_TICKLESS_KERNEL */
 
@@ -56,7 +58,7 @@
 #define GCLK_GEN(n) GCLK_EVAL(n)
 #define GCLK_EVAL(n) GCLK_CLKCTRL_GEN_GCLK##n
 
-/* Tick count of the last announce call. */
+/* Tick/cycle count of the last announce call. */
 static volatile u32_t rtc_last;
 
 #ifndef CONFIG_TICKLESS_KERNEL
@@ -69,9 +71,6 @@ static volatile u32_t rtc_timeout;
 
 #endif /* CONFIG_TICKLESS_KERNEL */
 
-static void rtc_reset(void);
-static void rtc_isr(void *arg);
-
 /*
  * Waits for RTC bus synchronization.
  */
@@ -82,8 +81,6 @@ static inline void rtc_sync(void)
 	}
 }
 
-#ifdef CONFIG_TICKLESS_KERNEL
-
 /*
  * Reads RTC COUNT register. First a read request must be written to READREQ,
  * then - when bus synchronization completes - the COUNT register is read and
@@ -91,17 +88,66 @@ static inline void rtc_sync(void)
  */
 static u32_t rtc_count(void)
 {
-	/* Request synchronization and read the COUNT register. */
 	RTC0->READREQ.reg = RTC_READREQ_RREQ;
 	rtc_sync();
 	return RTC0->COUNT.reg;
 }
 
-#endif /* CONFIG_TICKLESS_KERNEL */
+static void rtc_reset(void)
+{
+	rtc_sync();
 
-/*
- * Initializes the RTC peripheral.
- */
+	/* Disable interrupt. */
+	RTC0->INTENCLR.reg = RTC_MODE0_INTENCLR_MASK;
+	/* Clear interrupt flag. */
+	RTC0->INTFLAG.reg = RTC_MODE0_INTFLAG_MASK;
+
+	/* Disable RTC module. */
+	RTC0->CTRL.reg &= ~RTC_MODE0_CTRL_ENABLE;
+
+	rtc_sync();
+
+	/* Initiate software reset. */
+	RTC0->CTRL.reg |= RTC_MODE0_CTRL_SWRST;
+}
+
+static void rtc_isr(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	/* Read and clear the interrupt flag register. */
+	u16_t status = RTC0->INTFLAG.reg;
+
+	RTC0->INTFLAG.reg = status;
+
+#ifdef CONFIG_TICKLESS_KERNEL
+
+	/* Read the current counter and announce the elapsed time in ticks. */
+	u32_t count = rtc_count();
+
+	if (count != rtc_last) {
+		u32_t ticks = (count - rtc_last) / CYCLES_PER_TICK;
+
+		z_clock_announce(ticks);
+		rtc_last += ticks * CYCLES_PER_TICK;
+	}
+
+#else /* !CONFIG_TICKLESS_KERNEL */
+
+	if (status) {
+		/* RTC just ticked one more tick... */
+		if (++rtc_counter == rtc_timeout) {
+			z_clock_announce(rtc_counter - rtc_last);
+			rtc_last = rtc_counter;
+		}
+	} else {
+		/* ISR was invoked directly from z_clock_set_timeout. */
+		z_clock_announce(0);
+	}
+
+#endif /* CONFIG_TICKLESS_KERNEL */
+}
+
 int z_clock_driver_init(struct device *device)
 {
 	ARG_UNUSED(device);
@@ -109,7 +155,7 @@ int z_clock_driver_init(struct device *device)
 	/* Set up bus clock and GCLK generator. */
 	PM->APBAMASK.reg |= PM_APBAMASK_RTC;
 	GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(RTC_GCLK_ID) | GCLK_CLKCTRL_CLKEN
-			    | GCLK_GEN(CONFIG_RTC_SAM0_CLOCK_GENERATOR);
+			    | GCLK_GEN(DT_RTC_SAM0_CLOCK_GENERATOR);
 
 	while (GCLK->STATUS.bit.SYNCBUSY) {
 		/* Synchronize GCLK. */
@@ -128,12 +174,6 @@ int z_clock_driver_init(struct device *device)
 	rtc_sync();
 	RTC0->CTRL.reg = ctrl;
 
-	/* Enable RTC interrupt. */
-	NVIC_ClearPendingIRQ(CONFIG_RTC_SAM0_IRQ);
-	IRQ_CONNECT(CONFIG_RTC_SAM0_IRQ, CONFIG_RTC_SAM0_IRQ_PRIORITY, rtc_isr,
-		    0, 0);
-	irq_enable(CONFIG_RTC_SAM0_IRQ);
-
 #ifdef CONFIG_TICKLESS_KERNEL
 	/* Tickless kernel lets RTC count continually and ignores overflows. */
 	RTC0->INTENSET.reg = RTC_MODE0_INTENSET_CMP0;
@@ -150,6 +190,11 @@ int z_clock_driver_init(struct device *device)
 	rtc_sync();
 	RTC0->CTRL.reg |= RTC_MODE0_CTRL_ENABLE;
 
+	/* Enable RTC interrupt. */
+	NVIC_ClearPendingIRQ(DT_RTC_SAM0_IRQ);
+	IRQ_CONNECT(DT_RTC_SAM0_IRQ, DT_RTC_SAM0_IRQ_PRIORITY, rtc_isr, 0, 0);
+	irq_enable(DT_RTC_SAM0_IRQ);
+
 	return 0;
 }
 
@@ -159,24 +204,19 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 
 #ifdef CONFIG_TICKLESS_KERNEL
 
-	if (ticks < 0 || ticks > MAX_TICKS) {
-		/* Handle K_FOREVER and too big ticks values. */
-		ticks = MAX_TICKS;
-	}
+	ticks = (ticks == K_FOREVER) ? MAX_TICKS : ticks;
+	ticks = max(min(ticks - 1, (s32_t) MAX_TICKS), 0);
 
 	/* Compute number of RTC cycles until the next timeout. */
 	u32_t count = rtc_count();
-	u32_t timeout = ticks * CYCLES_PER_TICK
-			+ (count - rtc_last) % CYCLES_PER_TICK;
+	u32_t timeout = ticks * CYCLES_PER_TICK + count % CYCLES_PER_TICK;
 
 	/* Round to the nearest tick boundary. */
 	timeout = (timeout + CYCLES_PER_TICK - 1) / CYCLES_PER_TICK
 		  * CYCLES_PER_TICK;
 
 	if (timeout < TICK_THRESHOLD) {
-		/* Trigger the interrupt right away if ticks is too low. */
-		NVIC_SetPendingIRQ(CONFIG_RTC_SAM0_IRQ);
-		return;
+		timeout += CYCLES_PER_TICK;
 	}
 
 	rtc_sync();
@@ -184,7 +224,7 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 
 #else /* !CONFIG_TICKLESS_KERNEL */
 
-	if (ticks < 0) {
+	if (ticks == K_FOREVER) {
 		/* Disable comparator for K_FOREVER and other negative
 		 * values.
 		 */
@@ -192,10 +232,8 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 		return;
 	}
 
-	if (ticks == 0) {
-		/* Trigger the interrupt right away if ticks is zero. */
-		NVIC_SetPendingIRQ(CONFIG_RTC_SAM0_IRQ);
-		return;
+	if (ticks < 1) {
+		ticks = 1;
 	}
 
 	/* Avoid race condition between reading counter and ISR incrementing
@@ -209,9 +247,6 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 #endif /* CONFIG_TICKLESS_KERNEL */
 }
 
-/*
- * Gets number of ticks elapsed since the last z_clock_announce call.
- */
 u32_t z_clock_elapsed(void)
 {
 #ifdef CONFIG_TICKLESS_KERNEL
@@ -221,71 +256,8 @@ u32_t z_clock_elapsed(void)
 #endif
 }
 
-void z_clock_idle_exit(void)
-{
-	/* Nothing to do here, RTC bookkeeping is done in ISR. */
-}
-
 u32_t _timer_cycle_get_32(void)
 {
-	return (u32_t) z_tick_get() * CYCLES_PER_TICK;
-}
-
-/*
- * Resets RTC to its initial state.
- */
-void rtc_reset(void)
-{
-	rtc_sync();
-
-	/* Disable interrupt. */
-	RTC0->INTENCLR.reg = RTC_MODE0_INTENCLR_MASK;
-	/* Clear interrupt flag. */
-	RTC0->INTFLAG.reg = RTC_MODE0_INTFLAG_MASK;
-
-	/* Disable RTC module. */
-	RTC0->CTRL.reg &= ~RTC_MODE0_CTRL_ENABLE;
-
-	rtc_sync();
-
-	/* Initiate software reset. */
-	RTC0->CTRL.reg |= RTC_MODE0_CTRL_SWRST;
-}
-
-/*
- * Handles RTC interrupt.
- */
-void rtc_isr(void *arg)
-{
-	ARG_UNUSED(arg);
-
-	/* Read and clear the interrupt flag register. */
-	u16_t status = RTC0->INTFLAG.reg;
-
-	RTC0->INTFLAG.reg = status;
-
-#ifdef CONFIG_TICKLESS_KERNEL
-
-	/* Just read the current counter and announce the elapsed time. */
-	u32_t count = rtc_count();
-
-	if (count != rtc_last) {
-		z_clock_announce((count - rtc_last) / CYCLES_PER_TICK);
-		rtc_last = count;
-	}
-
-#else /* !CONFIG_TICKLESS_KERNEL */
-
-	if (status) {
-		/* RTC just ticked one more tick... */
-		if (++rtc_counter == rtc_timeout) {
-			z_clock_announce(rtc_counter - rtc_last);
-			rtc_last = rtc_counter;
-		}
-	} else {
-		/* ISR was invoked directly from z_clock_set_timeout. */
-		z_clock_announce(0);
-	}
-
-#endif /* CONFIG_TICKLESS_KERNEL */
+	/* Just return the absolute value of RTC cycle counter. */
+	return rtc_count();
 }

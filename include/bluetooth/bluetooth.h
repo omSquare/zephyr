@@ -29,6 +29,13 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Generic Access Profile
+ * @defgroup bt_gap Generic Access Profile
+ * @ingroup bluetooth
+ * @{
+ */
+
 /** @def BT_ID_DEFAULT
  *
  *  Convenience macro for specifying the default identity. This helps
@@ -36,13 +43,6 @@ extern "C" {
  *  supported.
  */
 #define BT_ID_DEFAULT 0
-
-/**
- * @brief Generic Access Profile
- * @defgroup bt_gap Generic Access Profile
- * @ingroup bluetooth
- * @{
- */
 
 /**
  * @typedef bt_ready_cb_t
@@ -343,6 +343,11 @@ struct bt_le_adv_param {
  *  @param sd_len Number of elements in sd
  *
  *  @return Zero on success or (negative) error code otherwise.
+ *  @return -ECONNREFUSED When connectable advertising is requested and there
+ *			  is already maximum number of connections established.
+ *			  This error code is only guaranteed when using Zephyr
+ *			  controller, for other controllers code returned in
+ *			  this case may be -EIO.
  */
 int bt_le_adv_start(const struct bt_le_adv_param *param,
 		    const struct bt_data *ad, size_t ad_len,
@@ -379,7 +384,7 @@ int bt_le_adv_stop(void);
  *  @param addr Advertiser LE address and type.
  *  @param rssi Strength of advertiser signal.
  *  @param adv_type Type of advertising response from advertiser.
- *  @param data Buffer containing advertiser data.
+ *  @param buf Buffer containing advertiser data.
  */
 typedef void bt_le_scan_cb_t(const bt_addr_le_t *addr, s8_t rssi,
 			     u8_t adv_type, struct net_buf_simple *buf);

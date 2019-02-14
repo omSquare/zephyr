@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define LOG_MODULE_NAME net_zperf_udp_send
-#define NET_LOG_LEVEL LOG_LEVEL_DBG
+#include <logging/log.h>
+LOG_MODULE_DECLARE(net_zperf_sample, LOG_LEVEL_DBG);
 
 #include <zephyr.h>
 
@@ -78,6 +78,8 @@ static inline void zperf_upload_decode_stat(const struct shell *shell,
 
 static void stat_received(struct net_context *context,
 			  struct net_pkt *pkt,
+			  union net_ip_header *ip_hdr,
+			  union net_proto_header *proto_hdr,
 			  int status,
 			  void *user_data)
 {
@@ -205,7 +207,7 @@ void zperf_udp_upload(const struct shell *shell,
 	u32_t duration = MSEC_TO_HW_CYCLES(duration_in_ms);
 	u32_t print_interval = SEC_TO_HW_CYCLES(1);
 	u32_t delay = packet_duration;
-	u32_t nb_packets = 0;
+	u32_t nb_packets = 0U;
 	u32_t start_time, last_print_time, last_loop_time, end_time;
 
 	if (packet_size > PACKET_SIZE_MAX) {
@@ -252,7 +254,7 @@ void zperf_udp_upload(const struct shell *shell,
 		if (adjust >= 0 || -adjust < delay) {
 			delay += adjust;
 		} else {
-			delay = 0; /* delay should never be a negative value */
+			delay = 0U; /* delay should never be a negative value */
 		}
 
 		last_loop_time = loop_time;

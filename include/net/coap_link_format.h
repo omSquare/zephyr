@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Intel Corporation
+ * Copyright (c) 2018 Intel Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +32,7 @@ extern "C" {
 int coap_well_known_core_get(struct coap_resource *resource,
 			     struct coap_packet *request,
 			     struct coap_packet *response,
-			     struct net_pkt *pkt);
+			     u8_t *data, u16_t len);
 
 /**
  * In case you want to add attributes to the resources included in the

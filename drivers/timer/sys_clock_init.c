@@ -18,6 +18,11 @@
 
 /* Weak-linked noop defaults for optional driver interfaces: */
 
+void __weak z_clock_isr(void *arg)
+{
+	__ASSERT_NO_MSG(false);
+}
+
 int __weak z_clock_driver_init(struct device *device)
 {
 	return 0;
@@ -30,6 +35,14 @@ int __weak z_clock_device_ctrl(struct device *device,
 }
 
 void __weak z_clock_set_timeout(s32_t ticks, bool idle)
+{
+}
+
+void __weak z_clock_idle_exit(void)
+{
+}
+
+void __weak sys_clock_disable(void)
 {
 }
 

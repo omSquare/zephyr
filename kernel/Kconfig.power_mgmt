@@ -6,7 +6,8 @@
 #
 
 menuconfig SYS_POWER_MANAGEMENT
-	bool "Power management"
+	bool "System Power management"
+	select TICKLESS_IDLE
 	help
 	  This option enables the board to implement extra power management
 	  policies whenever the kernel becomes idle. The kernel informs the
@@ -37,9 +38,9 @@ config PM_CONTROL_OS
 
 endchoice # POWER_MANAGEMENT_CONTROL
 
-config SYS_POWER_LOW_POWER_STATE
-	bool "Low power state"
-	depends on SYS_POWER_LOW_POWER_STATE_SUPPORTED
+config SYS_POWER_LOW_POWER_STATES
+	bool "Low Power states"
+	depends on SYS_POWER_LOW_POWER_STATES_SUPPORTED
 	help
 	  This option enables the kernel to interface with a power manager
 	  application.  This permits the system to enter a custom CPU low power
@@ -47,9 +48,9 @@ config SYS_POWER_LOW_POWER_STATE
 	  the CPU low power states supported by the processor.  Generally the one
 	  saving most power.
 
-config SYS_POWER_DEEP_SLEEP
-	bool "Deep sleep state"
-	depends on SYS_POWER_DEEP_SLEEP_SUPPORTED
+config SYS_POWER_DEEP_SLEEP_STATES
+	bool "Deep Sleep states"
+	depends on SYS_POWER_DEEP_SLEEP_STATES_SUPPORTED
 	help
 	  This option enables the kernel to interface with a power manager
 	  application. This permits the system to enter a Deep sleep state
@@ -58,6 +59,8 @@ config SYS_POWER_DEEP_SLEEP
 	  extended periods and would have a high wake latency.  Resume would be
 	  from the reset vector same as cold boot. The interface allows
 	  restoration of states that were saved at the time of suspend.
+
+endif # SYS_POWER_MANAGEMENT
 
 config DEVICE_POWER_MANAGEMENT
 	bool "Device power management"
@@ -69,5 +72,3 @@ config DEVICE_POWER_MANAGEMENT
 	  device drivers to do any necessary power management operations
 	  like turning off device clocks and peripherals. The device drivers
 	  may also save and restore states in these hook functions.
-
-endif

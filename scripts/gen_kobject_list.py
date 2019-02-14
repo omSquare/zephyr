@@ -17,7 +17,7 @@ from elf_helper import ElfHelper, kobject_to_enum
 # available in all configurations.
 
 kobjects = {
-    "k_alert": None,
+    "k_mem_slab": None,
     "k_msgq": None,
     "k_mutex": None,
     "k_pipe": None,
@@ -51,6 +51,7 @@ subsystems = [
     "sensor_driver_api",
     "spi_driver_api",
     "uart_driver_api",
+    "can_driver_api",
 ]
 
 

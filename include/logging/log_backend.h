@@ -28,7 +28,14 @@ struct log_backend;
 struct log_backend_api {
 	void (*put)(const struct log_backend *const backend,
 		    struct log_msg *msg);
+	void (*put_sync_string)(const struct log_backend *const backend,
+			 struct log_msg_ids src_level, u32_t timestamp,
+			 const char *fmt, va_list ap);
+	void (*put_sync_hexdump)(const struct log_backend *const backend,
+			 struct log_msg_ids src_level, u32_t timestamp,
+			 const char *metadata, const u8_t *data, u32_t len);
 
+	void (*dropped)(const struct log_backend *const backend, u32_t cnt);
 	void (*panic)(const struct log_backend *const backend);
 	void (*init)(void);
 };
@@ -80,7 +87,7 @@ extern const struct log_backend __log_backends_end[0];
 
 
 /**
- * @brief Function for putting message with log entry to the backend.
+ * @brief Put message with log entry to the backend.
  *
  * @param[in] backend  Pointer to the backend instance.
  * @param[in] msg      Pointer to message with log entry.
@@ -88,24 +95,89 @@ extern const struct log_backend __log_backends_end[0];
 static inline void log_backend_put(const struct log_backend *const backend,
 				   struct log_msg *msg)
 {
-	assert(backend);
-	assert(msg);
+	__ASSERT_NO_MSG(backend);
+	__ASSERT_NO_MSG(msg);
 	backend->api->put(backend, msg);
 }
 
 /**
- * @brief Function for reconfiguring backend to panic mode.
+ * @brief Synchronously process log message.
+ *
+ * @param[in] backend   Pointer to the backend instance.
+ * @param[in] src_level Message details.
+ * @param[in] timestamp Timestamp.
+ * @param[in] fmt       Log string.
+ * @param[in] ap        Log string arguments.
+ */
+static inline void log_backend_put_sync_string(
+					const struct log_backend *const backend,
+					struct log_msg_ids src_level,
+					u32_t timestamp, const char *fmt,
+					va_list ap)
+{
+	__ASSERT_NO_MSG(backend);
+
+	if (backend->api->put_sync_string) {
+		backend->api->put_sync_string(backend, src_level,
+					      timestamp, fmt, ap);
+	}
+}
+
+/**
+ * @brief Synchronously process log hexdump_message.
+ *
+ * @param[in] backend   Pointer to the backend instance.
+ * @param[in] src_level Message details.
+ * @param[in] timestamp Timestamp.
+ * @param[in] metadata  Raw string associated with the data.
+ * @param[in] data      Data.
+ * @param[in] len       Data length.
+ */
+static inline void log_backend_put_sync_hexdump(
+					const struct log_backend *const backend,
+					struct log_msg_ids src_level,
+					u32_t timestamp, const char *metadata,
+					const u8_t *data, u32_t len)
+{
+	__ASSERT_NO_MSG(backend);
+
+	if (backend->api->put_sync_hexdump) {
+		backend->api->put_sync_hexdump(backend, src_level, timestamp,
+					       metadata, data, len);
+	}
+}
+
+/**
+ * @brief Notify backend about dropped log messages.
+ *
+ * Function is optional.
+ *
+ * @param[in] backend  Pointer to the backend instance.
+ * @param[in] cnt      Number of dropped logs since last notification.
+ */
+static inline void log_backend_dropped(const struct log_backend *const backend,
+				       u32_t cnt)
+{
+	__ASSERT_NO_MSG(backend);
+
+	if (backend->api->dropped != NULL) {
+		backend->api->dropped(backend, cnt);
+	}
+}
+
+/**
+ * @brief Reconfigure backend to panic mode.
  *
  * @param[in] backend  Pointer to the backend instance.
  */
 static inline void log_backend_panic(const struct log_backend *const backend)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	backend->api->panic(backend);
 }
 
 /**
- * @brief Function for setting backend id.
+ * @brief Set backend id.
  *
  * @note It is used internally by the logger.
  *
@@ -115,12 +187,12 @@ static inline void log_backend_panic(const struct log_backend *const backend)
 static inline void log_backend_id_set(const struct log_backend *const backend,
 				      u8_t id)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	backend->cb->id = id;
 }
 
 /**
- * @brief Function for getting backend id.
+ * @brief Get backend id.
  *
  * @note It is used internally by the logger.
  *
@@ -129,12 +201,12 @@ static inline void log_backend_id_set(const struct log_backend *const backend,
  */
 static inline u8_t log_backend_id_get(const struct log_backend *const backend)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	return backend->cb->id;
 }
 
 /**
- * @brief Function for getting backend.
+ * @brief Get backend.
  *
  * @param[in] idx  Pointer to the backend instance.
  *
@@ -146,18 +218,17 @@ static inline const struct log_backend *log_backend_get(u32_t idx)
 }
 
 /**
- * @brief Function for getting number of backends.
+ * @brief Get number of backends.
  *
  * @return Number of backends.
  */
 static inline int log_backend_count_get(void)
 {
-	return ((u8_t *)__log_backends_end - (u8_t *)__log_backends_start) /
-			sizeof(struct log_backend);
+	return __log_backends_end - __log_backends_start;
 }
 
 /**
- * @brief Function for activating backend.
+ * @brief Activate backend.
  *
  * @param[in] backend  Pointer to the backend instance.
  * @param[in] ctx      User context.
@@ -165,25 +236,25 @@ static inline int log_backend_count_get(void)
 static inline void log_backend_activate(const struct log_backend *const backend,
 					void *ctx)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	backend->cb->ctx = ctx;
 	backend->cb->active = true;
 }
 
 /**
- * @brief Function for deactivating backend.
+ * @brief Deactivate backend.
  *
  * @param[in] backend  Pointer to the backend instance.
  */
 static inline void log_backend_deactivate(
 				const struct log_backend *const backend)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	backend->cb->active = false;
 }
 
 /**
- * @brief Function for checking state of the backend.
+ * @brief Check state of the backend.
  *
  * @param[in] backend  Pointer to the backend instance.
  *
@@ -192,7 +263,7 @@ static inline void log_backend_deactivate(
 static inline bool log_backend_is_active(
 				const struct log_backend *const backend)
 {
-	assert(backend);
+	__ASSERT_NO_MSG(backend);
 	return backend->cb->active;
 }
 
