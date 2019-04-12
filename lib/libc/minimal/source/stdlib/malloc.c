@@ -16,19 +16,15 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(os);
 
-#ifdef CONFIG_APP_SHARED_MEM
-K_APPMEM_PARTITION_DEFINE(z_malloc_partition);
-#endif
-
 #if (CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE > 0)
-#ifdef CONFIG_APP_SHARED_MEM
+#ifdef CONFIG_USERSPACE
+K_APPMEM_PARTITION_DEFINE(z_malloc_partition);
 #define POOL_SECTION K_APP_DMEM_SECTION(z_malloc_partition)
 #else
 #define POOL_SECTION .data
-#endif /* CONFIG_APP_SHARED_MEM */
+#endif /* CONFIG_USERSPACE */
 
-K_MUTEX_DEFINE(malloc_mutex);
-SYS_MEM_POOL_DEFINE(z_malloc_mem_pool, &malloc_mutex, 16,
+SYS_MEM_POOL_DEFINE(z_malloc_mem_pool, NULL, 16,
 		    CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE, 1, 4, POOL_SECTION);
 
 void *malloc(size_t size)
@@ -47,9 +43,6 @@ static int malloc_prepare(struct device *unused)
 {
 	ARG_UNUSED(unused);
 
-#ifdef CONFIG_USERSPACE
-	k_object_access_all_grant(&malloc_mutex);
-#endif
 	sys_mem_pool_init(&z_malloc_mem_pool);
 
 	return 0;

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import re
 from collections import OrderedDict
 
@@ -41,6 +42,7 @@ class Harness:
 class Console(Harness):
 
     def handle(self, line):
+
         if self.type == "one_line":
             pattern = re.compile(self.regex[0])
             if pattern.search(line):
@@ -56,7 +58,7 @@ class Console(Harness):
                 if self.ordered:
                     ordered = True
                     pos = 0
-                    for k,v in self.matches.items():
+                    for k in self.matches:
                         if k != self.regex[pos]:
                             ordered = False
                         pos += 1
@@ -77,6 +79,11 @@ class Console(Harness):
             self.capture_coverage = True
         elif self.GCOV_END in line:
             self.capture_coverage = False
+
+        if self.state == "passed":
+            self.tests[self.id] = "PASS"
+        else:
+            self.tests[self.id] = "FAIL"
 
 class Test(Harness):
     RUN_PASSED = "PROJECT EXECUTION SUCCESSFUL"

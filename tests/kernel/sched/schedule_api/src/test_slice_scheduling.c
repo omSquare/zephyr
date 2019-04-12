@@ -37,8 +37,8 @@ static void thread_tslice(void *p1, void *p2, void *p3)
 	int thread_parameter = ((int)p1 == (NUM_THREAD - 1)) ? '\n' :
 			       ((int)p1 + 'A');
 
-	s64_t expected_slice_min = __ticks_to_ms(_ms_to_ticks(SLICE_SIZE));
-	s64_t expected_slice_max = __ticks_to_ms(_ms_to_ticks(SLICE_SIZE) + 1);
+	s64_t expected_slice_min = __ticks_to_ms(z_ms_to_ticks(SLICE_SIZE));
+	s64_t expected_slice_max = __ticks_to_ms(z_ms_to_ticks(SLICE_SIZE) + 1);
 
 	while (1) {
 		s64_t tdelta = k_uptime_delta(&elapsed_slice);
@@ -55,7 +55,7 @@ static void thread_tslice(void *p1, void *p2, void *p3)
 		 * even though, when timeslice used up the next thread
 		 * should be scheduled in.
 		 */
-		k_busy_wait(1000 * BUSY_MS);
+		spin_for_ms(BUSY_MS);
 		k_sem_give(&sema1);
 	}
 
@@ -102,7 +102,7 @@ void test_slice_scheduling(void)
 		 * even though, when timeslice used up the next thread
 		 * should be scheduled in.
 		 */
-		k_busy_wait(1000 * BUSY_MS);
+		spin_for_ms(BUSY_MS);
 
 		/* relinquish CPU and wait for each thread to complete*/
 		for (int i = 0; i < NUM_THREAD; i++) {

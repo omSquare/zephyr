@@ -27,6 +27,7 @@ extern "C" {
 
 struct net_if;
 
+/** L2 flags */
 enum net_l2_flags {
 	/** IP multicast supported */
 	NET_L2_MULTICAST			= BIT(0),
@@ -38,6 +39,11 @@ enum net_l2_flags {
 	NET_L2_PROMISC_MODE			= BIT(2),
 } __packed;
 
+/**
+ * @brief Network L2 structure
+ *
+ * Used to provide an interface to lower network stack.
+ */
 struct net_l2 {
 	/**
 	 * This function is used by net core to get iface's L2 layer parsing
@@ -65,6 +71,7 @@ struct net_l2 {
 	enum net_l2_flags (*get_flags)(struct net_if *iface);
 };
 
+/** @cond INTERNAL_HIDDEN */
 #define NET_L2_GET_NAME(_name) (__net_l2_##_name)
 #define NET_L2_DECLARE_PUBLIC(_name)					\
 	extern const struct net_l2 NET_L2_GET_NAME(_name)
@@ -117,6 +124,8 @@ NET_L2_DECLARE_PUBLIC(CANBUS_L2);
 #define NET_L2_DATA_INIT(name, sfx, ctx_type)				\
 	static ctx_type NET_L2_GET_DATA(name, sfx) __used		\
 	__attribute__((__section__(".net_l2.data")));
+
+/** @endcond */
 
 /**
  * @}

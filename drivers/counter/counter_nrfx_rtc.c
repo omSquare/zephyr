@@ -87,10 +87,15 @@ static int counter_nrfx_set_alarm(struct device *dev, u8_t chan_id,
 		return -EBUSY;
 	}
 
-	cc_val = alarm_cfg->ticks + (alarm_cfg->absolute ?
-					0 : nrfx_rtc_counter_get(rtc));
-	cc_val = (cc_val > get_dev_data(dev)->top) ?
-			(cc_val - get_dev_data(dev)->top) : cc_val;
+	if (alarm_cfg->absolute) {
+		cc_val = alarm_cfg->ticks;
+	} else {
+		/* As RTC is 24 bit there is no risk of overflow. */
+		cc_val = alarm_cfg->ticks + nrfx_rtc_counter_get(rtc);
+		cc_val -= (cc_val > get_dev_data(dev)->top) ?
+				get_dev_data(dev)->top : 0;
+	}
+
 	nrfx_config->ch_data[chan_id].callback = alarm_cfg->callback;
 	nrfx_config->ch_data[chan_id].user_data = alarm_cfg->user_data;
 
@@ -99,7 +104,7 @@ static int counter_nrfx_set_alarm(struct device *dev, u8_t chan_id,
 	return 0;
 }
 
-static void _disable(struct device *dev, u8_t id)
+static void disable(struct device *dev, u8_t id)
 {
 	const struct counter_nrfx_config *config = get_nrfx_config(dev);
 
@@ -109,7 +114,7 @@ static void _disable(struct device *dev, u8_t id)
 
 static int counter_nrfx_cancel_alarm(struct device *dev, u8_t chan_id)
 {
-	_disable(dev, chan_id);
+	disable(dev, chan_id);
 
 	return 0;
 }
@@ -159,7 +164,7 @@ static void alarm_event_handler(struct device *dev, u32_t id)
 
 	cc_val = nrf_rtc_cc_get(config->rtc.p_reg, ID_TO_CC(id));
 
-	_disable(dev, id);
+	disable(dev, id);
 	clbk(dev, id, cc_val, config->ch_data[id].user_data);
 }
 
@@ -194,7 +199,7 @@ static int init_rtc(struct device *dev,
 	const struct counter_nrfx_config *nrfx_config = get_nrfx_config(dev);
 	const nrfx_rtc_t *rtc = &nrfx_config->rtc;
 
-	clock = device_get_binding(CONFIG_CLOCK_CONTROL_NRF_K32SRC_DRV_NAME);
+	clock = device_get_binding(DT_NORDIC_NRF_CLOCK_0_LABEL "_32K");
 	if (!clock) {
 		return -ENODEV;
 	}
@@ -245,8 +250,8 @@ static const struct counter_driver_api counter_nrfx_driver_api = {
 	}								       \
 	static int counter_##idx##_init(struct device *dev)		       \
 	{								       \
-		IRQ_CONNECT(NRFX_IRQ_NUMBER_GET(NRF_RTC##idx),		       \
-			    CONFIG_COUNTER_RTC##idx##_IRQ_PRI,		       \
+		IRQ_CONNECT(DT_NORDIC_NRF_RTC_RTC_##idx##_IRQ,		       \
+			    DT_NORDIC_NRF_RTC_RTC_##idx##_IRQ_PRIORITY,	       \
 			    nrfx_isr, nrfx_rtc_##idx##_irq_handler, 0);	       \
 		const nrfx_rtc_config_t config = {			       \
 			.prescaler = CONFIG_COUNTER_RTC##idx##_PRESCALER,      \
@@ -257,7 +262,7 @@ static const struct counter_driver_api counter_nrfx_driver_api = {
 	static struct counter_nrfx_ch_data				       \
 		counter##idx##_ch_data[CC_TO_ID(RTC##idx##_CC_NUM)];	       \
 	LOG_INSTANCE_REGISTER(LOG_MODULE_NAME, idx, CONFIG_COUNTER_LOG_LEVEL); \
-	static const struct counter_nrfx_config nrfx_counter_##idx##_config = {\
+	static const struct counter_nrfx_config nrfx_counter_##idx##z_config = {\
 		.info = {						       \
 			.max_top_value = COUNTER_MAX_TOP_VALUE,		       \
 			.freq = RTC_CLOCK /				       \
@@ -269,10 +274,11 @@ static const struct counter_driver_api counter_nrfx_driver_api = {
 		.rtc = NRFX_RTC_INSTANCE(idx),				       \
 		LOG_INSTANCE_PTR_INIT(log, LOG_MODULE_NAME, idx)	       \
 	};								       \
-	DEVICE_AND_API_INIT(rtc_##idx, CONFIG_COUNTER_RTC##idx##_NAME,	       \
+	DEVICE_AND_API_INIT(rtc_##idx,					       \
+			    DT_NORDIC_NRF_RTC_RTC_##idx##_LABEL,	       \
 			    counter_##idx##_init,			       \
 			    &counter_##idx##_data,			       \
-			    &nrfx_counter_##idx##_config.info,		       \
+			    &nrfx_counter_##idx##z_config.info,		       \
 			    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,  \
 			    &counter_nrfx_driver_api)
 

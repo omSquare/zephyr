@@ -33,7 +33,7 @@ The ``build`` command allows you to build any source tree from any directory
 in your file system, placing the build results in a folder of your choice.
 
 In its simplest form, the command can be run by navigating to the root folder
-(i.e. the folder containing a file:`CMakeLists.txt` file) of the Zephyr
+(i.e. the folder containing a :file:`CMakeLists.txt` file) of the Zephyr
 application of your choice and running::
 
   west build -b <BOARD>
@@ -49,8 +49,8 @@ To specify the build directory, use ``--build-dir`` (or ``-d``)::
   west build -b <BOARD> --build-dir path/to/build/directory
 
 Since the build directory defaults to :file:`build`, if you do not specify
-a build directory but a folder named file:`build` is present, that will be used,
-allowing you to incrementally build from outside the file:`build` folder with
+a build directory but a folder named :file:`build` is present, that will be used,
+allowing you to incrementally build from outside the :file:`build` folder with
 no additional parameters.
 
 .. note::
@@ -61,9 +61,9 @@ no additional parameters.
   whether ``-b`` is required, just try leaving it out. West will print an
   error if the option is required and was not given.
 
-To specify the source directory, use ``--source-dir`` (or ``-s``)::
+Specify the source directory path as the first positional argument::
 
-  west build -b <BOARD> --source-dir path/to/source/directory
+  west build -b <BOARD> path/to/source/directory
 
 Additionally you can specify the build system target using the ``--target``
 (or ``-t``) option. For example, to run the ``clean`` target::
@@ -79,10 +79,11 @@ Finally, you can add additional arguments to the CMake invocation performed by
 command. For example, to use the Unix Makefiles CMake generator instead of
 Ninja (which ``west build`` uses by default), run::
 
-  west build -- -G'Unix Makefiles'
+  west build -b reel_board samples/hello_world -- -G'Unix Makefiles'
 
-As another example, the following command adds the ``file.conf`` Kconfig
-fragment to the files which are merged into your final build configuration::
+As another example, and assuming you have already built a sample, the following
+command adds the ``file.conf`` Kconfig fragment to the files which are merged
+into your final build configuration::
 
   west build -- -DOVERLAY_CONFIG=file.conf
 
@@ -116,7 +117,7 @@ To specify the build directory, use ``--build-dir`` (or ``-d``)::
 
 Since the build directory defaults to :file:`build`, if you do not specify
 a build directory but a folder named :file:`build` is present, that will be
-used, allowing you to flash from outside the file:`build` folder with no
+used, allowing you to flash from outside the :file:`build` folder with no
 additional parameters.
 
 Choosing a Runner
@@ -212,7 +213,7 @@ To specify the build directory, use ``--build-dir`` (or ``-d``)::
 
 Since the build directory defaults to :file:`build`, if you do not specify
 a build directory but a folder named :file:`build` is present, that will be
-used, allowing you to debug from outside the file:`build` folder with no
+used, allowing you to debug from outside the :file:`build` folder with no
 additional parameters.
 
 Choosing a Runner
@@ -302,7 +303,7 @@ outside the west repository. Some reasons this choice was made are:
 
 The extension commands are a thin wrapper around a package called
 ``runners`` (this package is also in the Zephyr tree, in
-:file:`scripts/west_commands/runners`).
+:zephyr_file:`scripts/west_commands/runners`).
 
 The central abstraction within this library is ``ZephyrBinaryRunner``,
 an abstract class which represents *runner* objects, which can flash
@@ -322,7 +323,7 @@ upstream Zephyr, the runner should be added into a new or existing
 
 .. note::
 
-   The test cases in :file:`scripts/west_commands/tests` add unit test
+   The test cases in :zephyr_file:`scripts/west_commands/tests` add unit test
    coverage for the runners package and individual runner classes.
 
    Please try to add tests when adding new runners. Note that if your

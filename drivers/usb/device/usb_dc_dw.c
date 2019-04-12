@@ -64,7 +64,7 @@ struct usb_dw_ctrl_prv {
 
 static struct usb_dw_ctrl_prv usb_dw_ctrl;
 
-static inline void _usb_dw_int_unmask(void)
+static inline void usb_dw_int_unmask(void)
 {
 #if defined(CONFIG_SOC_QUARK_SE_C1000)
 	QM_INTERRUPT_ROUTER->usb_0_int_mask &= ~BIT(0);
@@ -398,7 +398,7 @@ static int usb_dw_tx(u8_t ep, const u8_t *const data,
 
 	key = irq_lock();
 
-	avail_space *= 4;
+	avail_space *= 4U;
 	if (!avail_space) {
 		LOG_ERR("USB IN EP%d no space available, DTXFSTS %x", ep_idx,
 			USB_DW->in_ep_reg[ep_idx].dtxfsts);
@@ -416,7 +416,7 @@ static int usb_dw_tx(u8_t ep, const u8_t *const data,
 		data_len = avail_space;
 	}
 
-	if (data_len != 0) {
+	if (data_len != 0U) {
 		/* Get max packet size and packet count for ep */
 		if (ep_idx == USB_DW_IN_EP_0) {
 			max_pkt_cnt =
@@ -478,7 +478,7 @@ static int usb_dw_tx(u8_t ep, const u8_t *const data,
 	 * to access a FIFO, the application must complete the transaction
 	 * before accessing the register."
 	 */
-	for (i = 0U; i < data_len; i += 4) {
+	for (i = 0U; i < data_len; i += 4U) {
 		u32_t val = data[i];
 
 		if (i + 1 < data_len) {
@@ -752,7 +752,7 @@ int usb_dc_attach(void)
 	    usb_dw_isr_handler, 0, IOAPIC_EDGE | IOAPIC_HIGH);
 	irq_enable(USB_DW_IRQ);
 
-	_usb_dw_int_unmask();
+	usb_dw_int_unmask();
 
 	usb_dw_ctrl.attached = 1U;
 
@@ -1119,7 +1119,7 @@ int usb_dc_ep_read_wait(u8_t ep, u8_t *data, u32_t max_data_len,
 		bytes_to_copy);
 
 	/* Data in the FIFOs is always stored per 32-bit words */
-	for (i = 0U; i < (bytes_to_copy & ~0x3); i += 4) {
+	for (i = 0U; i < (bytes_to_copy & ~0x3); i += 4U) {
 		*(u32_t *)(data + i) = USB_DW_EP_FIFO(ep_idx);
 	}
 	if (bytes_to_copy & 0x3) {
@@ -1128,7 +1128,7 @@ int usb_dc_ep_read_wait(u8_t ep, u8_t *data, u32_t max_data_len,
 
 		for (j = 0U; j < (bytes_to_copy & 0x3); j++) {
 			*(data + i + j) =
-				(sys_cpu_to_le32(last_dw) >> (8 * j)) & 0xFF;
+				(sys_cpu_to_le32(last_dw) >> (j * 8U)) & 0xFF;
 			}
 	}
 

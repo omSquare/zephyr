@@ -102,7 +102,7 @@ struct eth_context {
 	 * Note that we do not copy FCS into this buffer thus the
 	 * size is 1514 bytes.
 	 */
-	u8_t frame_buf[1500 + 14]; /* Max MTU + ethernet header size */
+	u8_t frame_buf[NET_ETH_MAX_FRAME_SIZE]; /* Max MTU + ethernet header */
 };
 
 static void eth_0_config_func(void);
@@ -497,14 +497,12 @@ static int eth_tx(struct device *dev, struct net_pkt *pkt)
 	bool timestamped_frame;
 #endif
 
-	k_sem_take(&context->tx_buf_sem, K_FOREVER);
-
 	/* As context->frame_buf is shared resource used by both eth_tx
 	 * and eth_rx, we need to protect it with irq_lock.
 	 */
 	imask = irq_lock();
 
-	if (net_pkt_read_new(pkt, context->frame_buf, total_len)) {
+	if (net_pkt_read(pkt, context->frame_buf, total_len)) {
 		irq_unlock(imask);
 		return -EIO;
 	}
@@ -545,6 +543,8 @@ static int eth_tx(struct device *dev, struct net_pkt *pkt)
 		LOG_ERR("ENET_SendFrame error: %d", (int)status);
 		return -1;
 	}
+
+	k_sem_take(&context->tx_buf_sem, K_FOREVER);
 
 	return 0;
 }
@@ -600,7 +600,7 @@ static void eth_rx(struct device *iface)
 		goto error;
 	}
 
-	if (net_pkt_write_new(pkt, context->frame_buf, frame_length)) {
+	if (net_pkt_write(pkt, context->frame_buf, frame_length)) {
 		irq_unlock(imask);
 		LOG_ERR("Unable to write frame into the pkt");
 		net_pkt_unref(pkt);
@@ -795,7 +795,7 @@ static int eth_0_init(struct device *dev)
 #endif
 
 	k_sem_init(&context->tx_buf_sem,
-		   CONFIG_ETH_MCUX_TX_BUFFERS, CONFIG_ETH_MCUX_TX_BUFFERS);
+		   0, CONFIG_ETH_MCUX_TX_BUFFERS);
 	k_work_init(&context->phy_work, eth_mcux_phy_work);
 	k_delayed_work_init(&context->delayed_phy_work,
 			    eth_mcux_delayed_phy_work);
@@ -1012,7 +1012,7 @@ static struct eth_context eth_0_context = {
 
 ETH_NET_DEVICE_INIT(eth_mcux_0, DT_ETH_MCUX_0_NAME, eth_0_init,
 		    &eth_0_context, NULL, CONFIG_ETH_INIT_PRIORITY,
-		    &api_funcs, 1500);
+		    &api_funcs, NET_ETH_MTU);
 
 static void eth_0_config_func(void)
 {

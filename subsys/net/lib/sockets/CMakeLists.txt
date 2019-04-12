@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+
 zephyr_include_directories(.)
 
 if(NOT CONFIG_NET_SOCKETS_OFFLOAD)
 zephyr_sources(
   getaddrinfo.c
+  getnameinfo.c
   sockets.c
   sockets_select.c
   sockets_misc.c

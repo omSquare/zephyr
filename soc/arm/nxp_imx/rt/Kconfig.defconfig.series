@@ -10,11 +10,6 @@ if SOC_SERIES_IMX_RT
 config SOC_SERIES
 	default "rt"
 
-config NUM_IRQS
-	int
-	# must be >= the highest interrupt number used
-	default 160
-
 config TEXT_SECTION_OFFSET
 	default 0x2000 if BOOT_FLEXSPI_NOR || BOOT_SEMC_NOR
 
@@ -95,6 +90,16 @@ config FLASH_BASE_ADDRESS
 	default $(dt_hex_val,DT_NXP_IMX_FLEXSPI_402A8000_BASE_ADDRESS_1)
 
 endif # CODE_FLEXSPI
+
+if CODE_FLEXSPI2
+
+config FLASH_SIZE
+        default $(dt_int_val,DT_NXP_IMX_FLEXSPI_402A4000_SIZE_1,K)
+
+config FLASH_BASE_ADDRESS
+        default $(dt_hex_val,DT_NXP_IMX_FLEXSPI_402A4000_BASE_ADDRESS_1)
+
+endif # CODE_FLEXSPI2
 
 if DATA_DTCM
 

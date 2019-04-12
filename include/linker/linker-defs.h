@@ -161,11 +161,11 @@ extern char __kernel_ram_start[];
 extern char __kernel_ram_end[];
 extern char __kernel_ram_size[];
 
-/* Used by _bss_zero or arch-specific implementation */
+/* Used by z_bss_zero or arch-specific implementation */
 extern char __bss_start[];
 extern char __bss_end[];
 
-/* Used by _data_copy() or arch-specific implementation */
+/* Used by z_data_copy() or arch-specific implementation */
 #ifdef CONFIG_XIP
 extern char __data_rom_start[];
 extern char __data_ram_start[];
@@ -186,9 +186,11 @@ extern char _image_ram_end[];
 
 extern char _image_text_start[];
 extern char _image_text_end[];
+extern char _image_text_size[];
 
 extern char _image_rodata_start[];
 extern char _image_rodata_end[];
+extern char _image_rodata_size[];
 
 extern char _vector_start[];
 extern char _vector_end[];
@@ -236,6 +238,19 @@ extern char _nocache_ram_start[];
 extern char _nocache_ram_end[];
 extern char _nocache_ram_size[];
 #endif /* CONFIG_NOCACHE_MEMORY */
+
+/* Memory owned by the kernel. Start and end will be aligned for memory
+ * management/protection hardware for the target architecture.
+ *
+ * All the functions with '__ramfunc' keyword will be placed into this
+ * section, stored in RAM instead of FLASH.
+ */
+#ifdef CONFIG_ARCH_HAS_RAMFUNC_SUPPORT
+extern char _ramfunc_ram_start[];
+extern char _ramfunc_ram_end[];
+extern char _ramfunc_ram_size[];
+extern char _ramfunc_rom_start[];
+#endif /* CONFIG_ARCH_HAS_RAMFUNC_SUPPORT */
 
 #endif /* ! _ASMLANGUAGE */
 

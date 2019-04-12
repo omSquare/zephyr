@@ -10,7 +10,7 @@
  *
  *
  * Initialization of full C support: zero the .bss, copy the .data if XIP,
- * call _Cstart().
+ * call z_cstart().
  *
  * Stack is available in this module, but not the global data/bss until their
  * initialization is performed.
@@ -22,8 +22,20 @@
 #include <linker/linker-defs.h>
 #include <kernel_internal.h>
 #include <arch/arm/cortex_m/cmsis.h>
-#include <string.h>
 #include <cortex_m/stack.h>
+
+#if defined(__GNUC__)
+/*
+ * GCC can detect if memcpy is passed a NULL argument, however one of
+ * the cases of relocate_vector_table() it is valid to pass NULL, so we
+ * supress the warning for this case.  We need to do this before
+ * string.h is included to get the declaration of memcpy.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonnull"
+#endif
+
+#include <string.h>
 
 static inline void switch_sp_to_psp(void)
 {
@@ -80,10 +92,11 @@ static inline void relocate_vector_table(void)
 #else
 
 #if defined(CONFIG_SW_VECTOR_RELAY)
-_GENERIC_SECTION(.vt_pointer_section) void *_vector_table_pointer;
+Z_GENERIC_SECTION(.vt_pointer_section) void *_vector_table_pointer;
 #endif
 
 #define VECTOR_ADDRESS 0
+
 void __weak relocate_vector_table(void)
 {
 #if defined(CONFIG_XIP) && (CONFIG_FLASH_BASE_ADDRESS != 0) || \
@@ -94,6 +107,10 @@ void __weak relocate_vector_table(void)
 	_vector_table_pointer = _vector_start;
 #endif
 }
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif /* CONFIG_CPU_CORTEX_M_HAS_VTOR */
 
@@ -134,7 +151,7 @@ static inline void enable_floating_point(void)
 }
 #endif
 
-extern FUNC_NORETURN void _Cstart(void);
+extern FUNC_NORETURN void z_cstart(void);
 /**
  *
  * @brief Prepare to and run C code
@@ -144,7 +161,7 @@ extern FUNC_NORETURN void _Cstart(void);
  * @return N/A
  */
 
-extern void _IntLibInit(void);
+extern void z_IntLibInit(void);
 
 #ifdef CONFIG_BOOT_TIME_MEASUREMENT
 	extern u64_t __start_time_stamp;
@@ -161,12 +178,12 @@ void _PrepC(void)
 	set_and_switch_to_psp();
 	relocate_vector_table();
 	enable_floating_point();
-	_bss_zero();
-	_data_copy();
+	z_bss_zero();
+	z_data_copy();
 #ifdef CONFIG_BOOT_TIME_MEASUREMENT
 	__start_time_stamp = 0U;
 #endif
-	_IntLibInit();
-	_Cstart();
+	z_IntLibInit();
+	z_cstart();
 	CODE_UNREACHABLE;
 }

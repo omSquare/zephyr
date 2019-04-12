@@ -332,18 +332,20 @@ SECTIONS
     SECTION_DATA_PROLOGUE(_GCOV_BSS_SECTION_NAME,(NOLOAD),)
 	{
 
-#ifdef CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT
-       . = ALIGN( 1 << LOG2CEIL(__gcov_bss_end - __gcov_bss_start ));
-#endif /* CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT */
+#ifdef CONFIG_USERSPACE
+       MPU_ALIGN(__gcov_bss_end - __gcov_bss_start );
+#else  /* CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT && CONFIG_USERSPACE */
+       . = ALIGN(_region_min_align);
+#endif /* CONFIG_USERSPACE */
 
        __gcov_bss_start = .;
        KEEP(*(".bss.__gcov0.*"));
 
-#ifdef CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT
-       . = ALIGN( 1 << LOG2CEIL(__gcov_bss_end - __gcov_bss_start ));
-#else  /* CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT */
-       . = ALIGN(4);
-#endif /* CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT */
+#ifdef CONFIG_USERSPACE
+       MPU_ALIGN(__gcov_bss_end - __gcov_bss_start );
+#else  /* CONFIG_USERSPACE */
+       . = ALIGN(_region_min_align);
+#endif /* CONFIG_USERSPACE */
 
        __gcov_bss_end = .;
 
@@ -368,7 +370,21 @@ SECTIONS
 	_nocache_ram_size = _nocache_ram_end - _nocache_ram_start;
 #endif /* CONFIG_NOCACHE_MEMORY */
 
-#if defined(CONFIG_APP_SHARED_MEM)
+#if defined(CONFIG_ARCH_HAS_RAMFUNC_SUPPORT)
+	SECTION_DATA_PROLOGUE(.ramfunc,,)
+	{
+		MPU_ALIGN(_ramfunc_ram_size);
+		_ramfunc_ram_start = .;
+		*(.ramfunc)
+		*(".ramfunc.*")
+		MPU_ALIGN(_ramfunc_ram_size);
+		_ramfunc_ram_end = .;
+	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
+	_ramfunc_ram_size = _ramfunc_ram_end - _ramfunc_ram_start;
+	_ramfunc_rom_start = LOADADDR(.ramfunc);
+#endif /* CONFIG_ARCH_HAS_RAMFUNC_SUPPORT */
+
+#if defined(CONFIG_USERSPACE)
 #define APP_SHARED_ALIGN . = ALIGN(_region_min_align);
 #define SMEM_PARTITION_ALIGN MPU_ALIGN
 
@@ -376,7 +392,7 @@ SECTIONS
 
 	_app_smem_size = _app_smem_end - _app_smem_start;
 	_app_smem_rom_start = LOADADDR(_APP_SMEM_SECTION_NAME);
-#endif  /* CONFIG_APP_SHARED_MEM */
+#endif  /* CONFIG_USERSPACE */
 
     SECTION_DATA_PROLOGUE(_BSS_SECTION_NAME,(NOLOAD),)
 	{
@@ -459,7 +475,7 @@ SECTIONS
 
     GROUP_START(CCM)
 
-	SECTION_PROLOGUE(_CCM_BSS_SECTION_NAME, (NOLOAD OPTIONAL),SUBALIGN(4))
+	SECTION_PROLOGUE(_CCM_BSS_SECTION_NAME, (NOLOAD),SUBALIGN(4))
 	{
 		__ccm_start = .;
 		__ccm_bss_start = .;
@@ -469,7 +485,7 @@ SECTIONS
 
 	__ccm_bss_end = .;
 
-	SECTION_PROLOGUE(_CCM_NOINIT_SECTION_NAME, (NOLOAD OPTIONAL),SUBALIGN(4))
+	SECTION_PROLOGUE(_CCM_NOINIT_SECTION_NAME, (NOLOAD),SUBALIGN(4))
 	{
 		__ccm_noinit_start = .;
 		*(.ccm_noinit)
@@ -478,7 +494,7 @@ SECTIONS
 
 	__ccm_noinit_end = .;
 
-	SECTION_PROLOGUE(_CCM_DATA_SECTION_NAME, (OPTIONAL),SUBALIGN(4))
+	SECTION_PROLOGUE(_CCM_DATA_SECTION_NAME,,SUBALIGN(4))
 	{
 		__ccm_data_start = .;
 		*(.ccm_data)

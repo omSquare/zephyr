@@ -49,7 +49,7 @@ static int gpio_mcux_configure(struct device *dev,
 	}
 
 	/* Check if GPIO port supports interrupts */
-	if ((flags & GPIO_INT) && ((config->flags & GPIO_INT) == 0)) {
+	if ((flags & GPIO_INT) && ((config->flags & GPIO_INT) == 0U)) {
 		return -ENOTSUP;
 	}
 
@@ -179,7 +179,7 @@ static int gpio_mcux_manage_callback(struct device *dev,
 {
 	struct gpio_mcux_data *data = dev->driver_data;
 
-	return _gpio_manage_callback(&data->callbacks, callback, set);
+	return gpio_manage_callback(&data->callbacks, callback, set);
 }
 
 static int gpio_mcux_enable_callback(struct device *dev,
@@ -220,7 +220,7 @@ static void gpio_mcux_port_isr(void *arg)
 	int_status = config->port_base->ISFR;
 	enabled_int = int_status & data->pin_callback_enables;
 
-	_gpio_fire_callbacks(&data->callbacks, dev, enabled_int);
+	gpio_fire_callbacks(&data->callbacks, dev, enabled_int);
 
 	/* Clear the port interrupts */
 	config->port_base->ISFR = 0xFFFFFFFF;
@@ -264,11 +264,8 @@ static int gpio_mcux_porta_init(struct device *dev)
 		    gpio_mcux_port_isr, DEVICE_GET(gpio_mcux_porta), 0);
 
 	irq_enable(DT_NXP_KINETIS_GPIO_GPIO_A_IRQ);
-
-	return 0;
-#else
-	return -1;
 #endif
+	return 0;
 }
 #endif /* CONFIG_GPIO_MCUX_PORTA */
 
@@ -300,11 +297,8 @@ static int gpio_mcux_portb_init(struct device *dev)
 		    gpio_mcux_port_isr, DEVICE_GET(gpio_mcux_portb), 0);
 
 	irq_enable(DT_NXP_KINETIS_GPIO_GPIO_B_IRQ);
-
-	return 0;
-#else
-	return -1;
 #endif
+	return 0;
 }
 #endif /* CONFIG_GPIO_MCUX_PORTB */
 
@@ -336,11 +330,8 @@ static int gpio_mcux_portc_init(struct device *dev)
 		    gpio_mcux_port_isr, DEVICE_GET(gpio_mcux_portc), 0);
 
 	irq_enable(DT_NXP_KINETIS_GPIO_GPIO_C_IRQ);
-
-	return 0;
-#else
-	return -1;
 #endif
+	return 0;
 }
 #endif /* CONFIG_GPIO_MCUX_PORTC */
 
@@ -372,11 +363,8 @@ static int gpio_mcux_portd_init(struct device *dev)
 		    gpio_mcux_port_isr, DEVICE_GET(gpio_mcux_portd), 0);
 
 	irq_enable(DT_NXP_KINETIS_GPIO_GPIO_D_IRQ);
-
-	return 0;
-#else
-	return -1;
 #endif
+	return 0;
 }
 #endif /* CONFIG_GPIO_MCUX_PORTD */
 
@@ -408,10 +396,7 @@ static int gpio_mcux_porte_init(struct device *dev)
 		    gpio_mcux_port_isr, DEVICE_GET(gpio_mcux_porte), 0);
 
 	irq_enable(DT_NXP_KINETIS_GPIO_GPIO_E_IRQ);
-
-	return 0;
-#else
-	return -1;
 #endif
+	return 0;
 }
 #endif /* CONFIG_GPIO_MCUX_PORTE */

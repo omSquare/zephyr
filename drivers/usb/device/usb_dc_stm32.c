@@ -747,8 +747,8 @@ int usb_dc_ep_write(const u8_t ep, const u8_t *const data,
 		irq_disable(DT_USB_IRQ);
 	}
 
-	if (ep == EP0_IN && len > MAX_PACKET_SIZE0) {
-		len = MAX_PACKET_SIZE0;
+	if (ep == EP0_IN && len > USB_MAX_CTRL_MPS) {
+		len = USB_MAX_CTRL_MPS;
 	}
 
 	status = HAL_PCD_EP_Transmit(&usb_dc_stm32_state.pcd, ep,
@@ -782,7 +782,14 @@ int usb_dc_ep_read_wait(u8_t ep, u8_t *data, u32_t max_data_len,
 			u32_t *read_bytes)
 {
 	struct usb_dc_stm32_ep_state *ep_state = usb_dc_stm32_get_ep_state(ep);
-	u32_t read_count = ep_state->read_count;
+	u32_t read_count;
+
+	if (!ep_state) {
+		LOG_ERR("Invalid Endpoint %x", ep);
+		return -EINVAL;
+	}
+
+	read_count = ep_state->read_count;
 
 	LOG_DBG("ep 0x%02x, %u bytes, %u+%u, %p", ep, max_data_len,
 		ep_state->read_offset, read_count, data);
@@ -797,7 +804,7 @@ int usb_dc_ep_read_wait(u8_t ep, u8_t *data, u32_t max_data_len,
 	 * previously stored in the buffer.
 	 */
 	if (data) {
-		read_count = min(read_count, max_data_len);
+		read_count = MIN(read_count, max_data_len);
 		memcpy(data, usb_dc_stm32_state.ep_buf[EP_IDX(ep)] +
 		       ep_state->read_offset, read_count);
 		ep_state->read_count -= read_count;
@@ -853,6 +860,20 @@ int usb_dc_ep_mps(const u8_t ep)
 	struct usb_dc_stm32_ep_state *ep_state = usb_dc_stm32_get_ep_state(ep);
 
 	return ep_state->ep_mps;
+}
+
+int usb_dc_detach(void)
+{
+	LOG_ERR("Not implemented");
+
+	return 0;
+}
+
+int usb_dc_reset(void)
+{
+	LOG_ERR("Not implemented");
+
+	return 0;
 }
 
 /* Callbacks from the STM32 Cube HAL code */
@@ -922,7 +943,7 @@ void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
 	if (ep_state->cb) {
 		ep_state->cb(EP0_OUT, USB_DC_EP_SETUP);
 
-		if (!(setup->wLength == 0) &&
+		if (!(setup->wLength == 0U) &&
 		    !(REQTYPE_GET_DIR(setup->bmRequestType) ==
 		    REQTYPE_DIR_TO_HOST)) {
 			usb_dc_ep_start_read(EP0_OUT,

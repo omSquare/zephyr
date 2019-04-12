@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 if SOC_NIOS2F_ZEPHYR
 
 config SOC
@@ -49,8 +51,6 @@ config UART_NS16550_PORT_0
 
 if UART_NS16550_PORT_0
 
-config UART_NS16550_PORT_0_IRQ_PRI
-	default 3
 config UART_NS16550_PORT_0_OPTIONS
 	default 0
 

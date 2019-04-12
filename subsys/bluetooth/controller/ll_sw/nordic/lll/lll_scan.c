@@ -7,6 +7,7 @@
 #include <zephyr/types.h>
 #include <toolchain.h>
 #include <bluetooth/hci.h>
+#include <misc/byteorder.h>
 
 #include "hal/ccm.h"
 #include "hal/radio.h"
@@ -117,7 +118,7 @@ static int prepare_cb(struct lll_prepare_param *prepare_param)
 {
 	struct lll_scan *lll = prepare_param->param;
 	struct node_rx_pdu *node_rx;
-	u32_t aa = 0x8e89bed6;
+	u32_t aa = sys_cpu_to_le32(0x8e89bed6);
 	u32_t ticks_at_event;
 	struct evt_hdr *evt;
 	u32_t remainder_us;
@@ -145,7 +146,7 @@ static int prepare_cb(struct lll_prepare_param *prepare_param)
 
 	radio_reset();
 	/* TODO: other Tx Power settings */
-	radio_tx_power_set(0);
+	radio_tx_power_set(RADIO_TXP_DEFAULT);
 
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 	/* TODO: if coded we use S8? */
@@ -290,8 +291,8 @@ static int is_abort_cb(void *next, int prio, void *curr,
 	radio_isr_set(isr_done, lll);
 	radio_disable();
 
-	if (++lll->chan == 3) {
-		lll->chan = 0;
+	if (++lll->chan == 3U) {
+		lll->chan = 0U;
 	}
 
 	lll_chan_set(37 + lll->chan);
@@ -362,7 +363,7 @@ static void isr_rx(void *param)
 		irkmatch_id = radio_ar_match_get();
 		rssi_ready = radio_rssi_is_ready();
 	} else {
-		crc_ok = devmatch_ok = irkmatch_ok = rssi_ready = 0;
+		crc_ok = devmatch_ok = irkmatch_ok = rssi_ready = 0U;
 		devmatch_id = irkmatch_id = 0xFF;
 	}
 
@@ -544,8 +545,8 @@ static void isr_cleanup(void *param)
 
 	radio_filter_disable();
 
-	if (++lll->chan == 3) {
-		lll->chan = 0;
+	if (++lll->chan == 3U) {
+		lll->chan = 0U;
 	}
 
 #if defined(CONFIG_BT_HCI_MESH_EXT)
@@ -594,7 +595,7 @@ static inline bool isr_rx_scan_check(struct lll_scan *lll, u8_t irkmatch_ok,
 		(((_radio.scanner.filter_policy & 0x01) != 0) &&
 		 (devmatch_ok || ctrl_irk_whitelisted(rl_idx)));
 #else
-	return ((lll->filter_policy & 0x01) == 0) ||
+	return ((lll->filter_policy & 0x01) == 0U) ||
 		devmatch_ok;
 #endif /* CONFIG_BT_CTLR_PRIVACY */
 }
@@ -646,7 +647,7 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 			u32_t scan_interval_us;
 
 			/* FIXME: is this correct for continuous scanning? */
-			scan_interval_us = lll->interval * 625;
+			scan_interval_us = lll->interval * 625U;
 			pdu_end_us %= scan_interval_us;
 		}
 		evt = HDR_LLL2EVT(lll);
@@ -696,13 +697,13 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 		       &lll_conn->crc_init[0], 3);
 		pdu_tx->connect_ind.win_size = 1;
 
-		conn_interval_us = (u32_t)lll_conn->interval * 1250;
+		conn_interval_us = (u32_t)lll_conn->interval * 1250U;
 		conn_offset_us = radio_tmr_end_get() + 502 + 1250;
 
 		if (!IS_ENABLED(CONFIG_BT_CTLR_SCHED_ADVANCED) ||
-		    lll->conn_win_offset_us == 0) {
+		    lll->conn_win_offset_us == 0U) {
 			conn_space_us = conn_offset_us;
-			pdu_tx->connect_ind.win_offset = 0;
+			pdu_tx->connect_ind.win_offset = sys_cpu_to_le16(0);
 		} else {
 			conn_space_us = lll->conn_win_offset_us;
 			while ((conn_space_us & ((u32_t)1 << 31)) ||
@@ -710,13 +711,17 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 				conn_space_us += conn_interval_us;
 			}
 			pdu_tx->connect_ind.win_offset =
-				(conn_space_us - conn_offset_us) / 1250;
+				sys_cpu_to_le16((conn_space_us -
+						 conn_offset_us) / 1250U);
 			pdu_tx->connect_ind.win_size++;
 		}
 
-		pdu_tx->connect_ind.interval = lll_conn->interval;
-		pdu_tx->connect_ind.latency = lll_conn->latency;
-		pdu_tx->connect_ind.timeout = lll->conn_timeout;
+		pdu_tx->connect_ind.interval =
+			sys_cpu_to_le16(lll_conn->interval);
+		pdu_tx->connect_ind.latency =
+			sys_cpu_to_le16(lll_conn->latency);
+		pdu_tx->connect_ind.timeout =
+			sys_cpu_to_le16(lll->conn_timeout);
 		memcpy(&pdu_tx->connect_ind.chan_map[0],
 		       &lll_conn->data_chan_map[0],
 		       sizeof(pdu_tx->connect_ind.chan_map));
@@ -785,6 +790,7 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 	/* Active scanner */
 	} else if (((pdu_adv_rx->type == PDU_ADV_TYPE_ADV_IND) ||
 		    (pdu_adv_rx->type == PDU_ADV_TYPE_SCAN_IND)) &&
+		   (pdu_adv_rx->len <= sizeof(struct pdu_adv_adv_ind)) &&
 		   lll->type &&
 #if defined(CONFIG_BT_CENTRAL)
 		   !lll->conn) {
@@ -828,7 +834,7 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 		       &pdu_adv_rx->adv_ind.addr[0], BDADDR_SIZE);
 
 		/* switch scanner state to active */
-		lll->state = 1;
+		lll->state = 1U;
 		radio_isr_set(isr_tx, lll);
 
 		radio_tmr_tifs_set(TIFS_US);
@@ -862,19 +868,22 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 		return 0;
 	}
 	/* Passive scanner or scan responses */
-	else if (((pdu_adv_rx->type == PDU_ADV_TYPE_ADV_IND) ||
+	else if (((((pdu_adv_rx->type == PDU_ADV_TYPE_ADV_IND) ||
+		    (pdu_adv_rx->type == PDU_ADV_TYPE_NONCONN_IND) ||
+		    (pdu_adv_rx->type == PDU_ADV_TYPE_SCAN_IND)) &&
+		   (pdu_adv_rx->len <= sizeof(struct pdu_adv_adv_ind))) ||
 		  ((pdu_adv_rx->type == PDU_ADV_TYPE_DIRECT_IND) &&
+		   (pdu_adv_rx->len == sizeof(struct pdu_adv_direct_ind)) &&
 		   (/* allow directed adv packets addressed to this device */
 		    isr_scan_tgta_check(lll, false, pdu_adv_rx, rl_idx,
 					&dir_report))) ||
-		  (pdu_adv_rx->type == PDU_ADV_TYPE_NONCONN_IND) ||
-		  (pdu_adv_rx->type == PDU_ADV_TYPE_SCAN_IND) ||
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 		  ((pdu_adv_rx->type == PDU_ADV_TYPE_EXT_IND) &&
 		   (lll->phy)) ||
 #endif /* CONFIG_BT_CTLR_ADV_EXT */
 		  ((pdu_adv_rx->type == PDU_ADV_TYPE_SCAN_RSP) &&
-		   (lll->state != 0) &&
+		   (pdu_adv_rx->len <= sizeof(struct pdu_adv_scan_rsp)) &&
+		   (lll->state != 0U) &&
 		   isr_scan_rsp_adva_matches(pdu_adv_rx))) &&
 		 (pdu_adv_rx->len != 0) &&
 #if defined(CONFIG_BT_CENTRAL)
@@ -905,10 +914,12 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 static inline bool isr_scan_init_check(struct lll_scan *lll,
 				       struct pdu_adv *pdu, u8_t rl_idx)
 {
-	return ((((lll->filter_policy & 0x01) != 0) ||
+	return ((((lll->filter_policy & 0x01) != 0U) ||
 		 isr_scan_init_adva_check(lll, pdu, rl_idx)) &&
-		((pdu->type == PDU_ADV_TYPE_ADV_IND) ||
+		(((pdu->type == PDU_ADV_TYPE_ADV_IND) &&
+		  (pdu->len <= sizeof(struct pdu_adv_adv_ind))) ||
 		 ((pdu->type == PDU_ADV_TYPE_DIRECT_IND) &&
+		  (pdu->len == sizeof(struct pdu_adv_direct_ind)) &&
 		  (/* allow directed adv packets addressed to this device */
 		   isr_scan_tgta_check(lll, true, pdu, rl_idx, NULL)))));
 }
@@ -955,7 +966,7 @@ static inline bool isr_scan_tgta_rpa_check(struct lll_scan *lll,
 					   struct pdu_adv *pdu,
 					   bool *dir_report)
 {
-	if (((lll->filter_policy & 0x02) != 0) &&
+	if (((lll->filter_policy & 0x02) != 0U) &&
 	    (pdu->rx_addr != 0) &&
 	    ((pdu->direct_ind.tgt_addr[5] & 0xc0) == 0x40)) {
 

@@ -109,7 +109,7 @@ static void tab_item_print(const struct shell *shell, const char *option,
 			- shell_strlen(tab)) / longest_option;
 	diff = longest_option - shell_strlen(option);
 
-	if (shell->ctx->vt100_ctx.printed_cmd++ % columns == 0) {
+	if (shell->ctx->vt100_ctx.printed_cmd++ % columns == 0U) {
 		shell_internal_fprintf(shell, SHELL_OPTION, "\n%s%s", tab,
 				       option);
 	} else {
@@ -280,7 +280,7 @@ static bool tab_prepare(const struct shell *shell,
 	u16_t compl_space = completion_space_get(shell);
 	size_t search_argc;
 
-	if (compl_space == 0) {
+	if (compl_space == 0U) {
 		return false;
 	}
 
@@ -535,23 +535,13 @@ static int exec_cmd(const struct shell *shell, size_t argc, char **argv,
 		}
 	}
 
-	if (shell->ctx->active_cmd.args) {
-		const struct shell_static_args *args;
+	if (shell->ctx->active_cmd.args.mandatory) {
+		u8_t mand = shell->ctx->active_cmd.args.mandatory;
+		u8_t opt = shell->ctx->active_cmd.args.optional;
+		bool in_range = (argc >= mand) && (argc <= (mand + opt));
 
-		args = shell->ctx->active_cmd.args;
-
-		if (args->optional > 0) {
-			/* Check if argc is within allowed range */
-			ret_val = cmd_precheck(shell,
-					       ((argc >= args->mandatory)
-					       &&
-					       (argc <= args->mandatory +
-					       args->optional)));
-		} else {
-			/* Perform exact match if there are no optional args */
-			ret_val = cmd_precheck(shell,
-					       (args->mandatory == argc));
-		}
+		/* Check if argc is within allowed range */
+		ret_val = cmd_precheck(shell, in_range);
 	}
 
 	if (!ret_val) {
@@ -617,6 +607,9 @@ static int execute(const struct shell *shell)
 				       quote);
 		return -ENOEXEC;
 	}
+
+	/* Initialize help variable */
+	help_entry.help = NULL;
 
 	/* Below loop is analyzing subcommands of found root command. */
 	while (true) {
@@ -844,7 +837,7 @@ static bool process_nl(const struct shell *shell, u8_t data)
 		return false;
 	}
 
-	if ((flag_last_nl_get(shell) == 0) ||
+	if ((flag_last_nl_get(shell) == 0U) ||
 	    (data == flag_last_nl_get(shell))) {
 		flag_last_nl_set(shell, data);
 		return true;
@@ -889,7 +882,7 @@ static void state_collect(const struct shell *shell)
 				 * on received NL.
 				 */
 				state_set(shell, SHELL_STATE_ACTIVE);
-				return;
+				continue;
 			}
 
 			switch (data) {
@@ -957,7 +950,7 @@ static void state_collect(const struct shell *shell)
 			receive_state_change(shell, SHELL_RECEIVE_DEFAULT);
 
 			if (!flag_echo_get(shell)) {
-				return;
+				continue;
 			}
 
 			switch (data) {
@@ -1098,7 +1091,7 @@ static int instance_init(const struct shell *shell, const void *p_config,
 	}
 
 	flag_tx_rdy_set(shell, true);
-	flag_echo_set(shell, CONFIG_SHELL_ECHO_STATUS);
+	flag_echo_set(shell, IS_ENABLED(CONFIG_SHELL_ECHO_STATUS));
 	flag_mode_delete_set(shell,
 			     IS_ENABLED(CONFIG_SHELL_BACKSPACE_MODE_DELETE));
 	shell->ctx->state = SHELL_STATE_INITIALIZED;
@@ -1305,8 +1298,8 @@ void shell_process(const struct shell *shell)
 
 	union shell_internal internal;
 
-	internal.value = 0;
-	internal.flags.processing = 1;
+	internal.value = 0U;
+	internal.flags.processing = 1U;
 
 	(void)atomic_or((atomic_t *)&shell->ctx->internal.value,
 			internal.value);
@@ -1325,7 +1318,7 @@ void shell_process(const struct shell *shell)
 	}
 
 	internal.value = 0xFFFFFFFF;
-	internal.flags.processing = 0;
+	internal.flags.processing = 0U;
 	(void)atomic_and((atomic_t *)&shell->ctx->internal.value,
 			 internal.value);
 }

@@ -97,7 +97,7 @@ The board configuration supports the following hardware features:
 
 
 The default configuration can be found in the Kconfig
-:file:`boards/arm/cy8ckit_062_wifi_bt_m0/cy8ckit_062_wifi_bt_m0_defconfig`.
+:zephyr_file:`boards/arm/cy8ckit_062_wifi_bt_m0/cy8ckit_062_wifi_bt_m0_defconfig`.
 
 
 System Clock
@@ -128,13 +128,9 @@ Cy_WDT_Disable().
 
 Build the project for CM0+
 
-.. code-block:: console
-
-   $ cd samples/hello_world
-   $ mkdir build
-   $ cd build
-   $ cmake -G"Eclipse CDT4 - Ninja" -DBOARD=cy8ckit_062_wifi_bt_m0 ..
-   $ ninja
+.. zephyr-app-commands::
+   :board: cy8ckit_062_wifi_bt_m0
+   :goals: build
 
 Switch the DevKit into CMSIS-DAP mode using SW3 (LED2 should blink) and flash
 the board:

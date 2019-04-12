@@ -40,8 +40,8 @@ ZTEST_BMEM u8_t rx_buffer[PIPE_SIZE];
 #define ALL_BYTES (sizeof(tx_buffer))
 
 #define RETURN_SUCCESS  (0)
-#define TIMEOUT_VAL (MSEC(10))
-#define TIMEOUT_200MSEC (MSEC(200))
+#define TIMEOUT_VAL (K_MSEC(10))
+#define TIMEOUT_200MSEC (K_MSEC(200))
 
 /* encompasing structs */
 struct pipe_sequence {
@@ -675,7 +675,7 @@ void pipe_put_get_timeout(void)
 
 /******************************************************************************/
 ZTEST_BMEM bool valid_fault;
-void _SysFatalErrorHandler(unsigned int reason, const NANO_ESF *pEsf)
+void z_SysFatalErrorHandler(unsigned int reason, const NANO_ESF *pEsf)
 {
 	printk("Caught system error -- reason %d\n", reason);
 	if (valid_fault) {

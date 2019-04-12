@@ -29,6 +29,7 @@ extern "C" {
 /* Special own address types for LL privacy (used in adv & scan parameters) */
 #define BT_HCI_OWN_ADDR_RPA_OR_PUBLIC  0x02
 #define BT_HCI_OWN_ADDR_RPA_OR_RANDOM  0x03
+#define BT_HCI_OWN_ADDR_RPA_MASK       0x02
 
 /** Bluetooth Device Address */
 typedef struct {
@@ -335,6 +336,9 @@ struct bt_hci_cmd_hdr {
 
 /* Construct OpCode from OGF and OCF */
 #define BT_OP(ogf, ocf)                         ((ocf) | ((ogf) << 10))
+
+/* Invalid opcode */
+#define BT_OP_NOP				0x0000
 
 /* Obtain OGF from OpCode */
 #define BT_OGF(opcode)                          (((opcode) >> 10) & BIT_MASK(6))

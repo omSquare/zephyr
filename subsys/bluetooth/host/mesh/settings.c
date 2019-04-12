@@ -439,12 +439,11 @@ static int hb_pub_set(int argc, char **argv, void *val_ctx)
 	}
 
 	if (settings_val_get_len_cb(val_ctx) == 0) {
-		BT_DBG("val (null)");
 		pub->dst = BT_MESH_ADDR_UNASSIGNED;
-		pub->count = 0;
-		pub->ttl = 0;
-		pub->period = 0;
-		pub->feat = 0;
+		pub->count = 0U;
+		pub->ttl = 0U;
+		pub->period = 0U;
+		pub->feat = 0U;
 
 		BT_DBG("Cleared heartbeat publication");
 		return 0;
@@ -465,7 +464,7 @@ static int hb_pub_set(int argc, char **argv, void *val_ctx)
 	if (hb_val.indefinite) {
 		pub->count = 0xffff;
 	} else {
-		pub->count = 0;
+		pub->count = 0U;
 	}
 
 	BT_DBG("Restored heartbeat publication");
@@ -483,7 +482,6 @@ static int cfg_set(int argc, char **argv, void *val_ctx)
 	}
 
 	if (settings_val_get_len_cb(val_ctx) == 0) {
-		BT_DBG("val (null)");
 		stored_cfg.valid = false;
 		BT_DBG("Cleared configuration state");
 		return 0;
@@ -512,7 +510,6 @@ static int mod_set_bind(struct bt_mesh_model *mod, void *val_ctx)
 	}
 
 	if (settings_val_get_len_cb(val_ctx) == 0) {
-		BT_DBG("val (null)");
 		BT_DBG("Cleared bindings for model");
 		return 0;
 	}
@@ -536,7 +533,6 @@ static int mod_set_sub(struct bt_mesh_model *mod, void *val_ctx)
 	(void)memset(mod->groups, 0, sizeof(mod->groups));
 
 	if (settings_val_get_len_cb(val_ctx) == 0) {
-		BT_DBG("val (null)");
 		BT_DBG("Cleared subscriptions for model");
 		return 0;
 	}
@@ -563,14 +559,13 @@ static int mod_set_pub(struct bt_mesh_model *mod, void *val_ctx)
 	}
 
 	if (settings_val_get_len_cb(val_ctx) == 0) {
-		BT_DBG("val (null)");
 		mod->pub->addr = BT_MESH_ADDR_UNASSIGNED;
-		mod->pub->key = 0;
-		mod->pub->cred = 0;
-		mod->pub->ttl = 0;
-		mod->pub->period = 0;
-		mod->pub->retransmit = 0;
-		mod->pub->count = 0;
+		mod->pub->key = 0U;
+		mod->pub->cred = 0U;
+		mod->pub->ttl = 0U;
+		mod->pub->period = 0U;
+		mod->pub->retransmit = 0U;
+		mod->pub->count = 0U;
 
 		BT_DBG("Cleared publication for model");
 		return 0;
@@ -588,7 +583,7 @@ static int mod_set_pub(struct bt_mesh_model *mod, void *val_ctx)
 	mod->pub->ttl = pub.ttl;
 	mod->pub->period = pub.period;
 	mod->pub->retransmit = pub.retransmit;
-	mod->pub->count = 0;
+	mod->pub->count = 0U;
 
 	BT_DBG("Restored model publication, dst 0x%04x app_idx 0x%03x",
 	       pub.addr, pub.key);
@@ -744,7 +739,7 @@ static int mesh_commit(void)
 	}
 
 	if (IS_ENABLED(CONFIG_BT_MESH_PB_GATT)) {
-		bt_mesh_proxy_prov_disable();
+		bt_mesh_proxy_prov_disable(true);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(bt_mesh.sub); i++) {
@@ -1200,7 +1195,12 @@ static void store_pending_mod_bind(struct bt_mesh_model *mod, bool vnd)
 
 	encode_mod_path(mod, vnd, "bind", path, sizeof(path));
 
-	err = settings_save_one(path, keys, count * sizeof(keys[0]));
+	if (count) {
+		err = settings_save_one(path, keys, count * sizeof(keys[0]));
+	} else {
+		err = settings_delete(path);
+	}
+
 	if (err) {
 		BT_ERR("Failed to store %s value", log_strdup(path));
 	} else {
@@ -1222,7 +1222,13 @@ static void store_pending_mod_sub(struct bt_mesh_model *mod, bool vnd)
 
 	encode_mod_path(mod, vnd, "sub", path, sizeof(path));
 
-	err = settings_save_one(path, groups, count * sizeof(groups[0]));
+	if (count) {
+		err = settings_save_one(path, groups,
+					count * sizeof(groups[0]));
+	} else {
+		err = settings_delete(path);
+	}
+
 	if (err) {
 		BT_ERR("Failed to store %s value", log_strdup(path));
 	} else {
@@ -1234,13 +1240,12 @@ static void store_pending_mod_pub(struct bt_mesh_model *mod, bool vnd)
 {
 	struct mod_pub_val pub;
 	char path[20];
-	void *val;
 	int err;
-	size_t len;
+
+	encode_mod_path(mod, vnd, "pub", path, sizeof(path));
 
 	if (!mod->pub || mod->pub->addr == BT_MESH_ADDR_UNASSIGNED) {
-		val = NULL;
-		len = 0;
+		err = settings_delete(path);
 	} else {
 		pub.addr = mod->pub->addr;
 		pub.key = mod->pub->key;
@@ -1250,13 +1255,9 @@ static void store_pending_mod_pub(struct bt_mesh_model *mod, bool vnd)
 		pub.period_div = mod->pub->period_div;
 		pub.cred = mod->pub->cred;
 
-		val = &pub;
-		len = sizeof(pub);
+		err = settings_save_one(path, &pub, sizeof(pub));
 	}
 
-	encode_mod_path(mod, vnd, "pub", path, sizeof(path));
-
-	err = settings_save_one(path, val, len);
 	if (err) {
 		BT_ERR("Failed to store %s value", log_strdup(path));
 	} else {

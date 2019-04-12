@@ -26,6 +26,7 @@
 #include <sys_io.h>
 #include <misc/__assert.h>
 #include <misc/slist.h>
+#include <misc/speculation.h>
 
 #include "gpio_utils.h"
 
@@ -157,7 +158,7 @@ static int gpio_intel_apl_isr(struct device *dev)
 	reg = cfg->reg_base + REG_GPI_INT_STS_BASE
 		+ ((cfg->pin_offset >> 5) << 2);
 	int_sts = sys_read32(reg);
-	acc_mask = 0;
+	acc_mask = 0U;
 
 	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&data->cb, cb, tmp, node) {
 		cur_mask = int_sts & cb->pin_mask;
@@ -204,6 +205,7 @@ static int gpio_intel_apl_config(struct device *dev, int access_op,
 	if (pin > cfg->num_pins) {
 		return -EINVAL;
 	}
+	pin = k_array_index_sanitize(pin, cfg->num_pins + 1);
 
 	raw_pin = cfg->pin_offset + pin;
 
@@ -218,7 +220,7 @@ static int gpio_intel_apl_config(struct device *dev, int access_op,
 	}
 
 	/* read in pad configuration register */
-	reg = cfg->reg_base + data->pad_base + (raw_pin * 8);
+	reg = cfg->reg_base + data->pad_base + (raw_pin * 8U);
 	cfg0 = sys_read32(reg);
 	cfg1 = sys_read32(reg + 4);
 
@@ -243,7 +245,7 @@ static int gpio_intel_apl_config(struct device *dev, int access_op,
 	/* setup interrupt if desired */
 	if (flags & GPIO_INT) {
 		/* invert signal for interrupt controller */
-		if (flags & GPIO_INT_ACTIVE_LOW) {
+		if ((flags & GPIO_INT_ACTIVE_HIGH) == GPIO_INT_ACTIVE_LOW) {
 			cfg0 |= PAD_CFG0_RXINV;
 		}
 
@@ -294,6 +296,7 @@ static int gpio_intel_apl_write(struct device *dev, int access_op,
 	if (pin > cfg->num_pins) {
 		return -EINVAL;
 	}
+	pin = k_array_index_sanitize(pin, cfg->num_pins + 1);
 
 	raw_pin = cfg->pin_offset + pin;
 
@@ -301,7 +304,7 @@ static int gpio_intel_apl_write(struct device *dev, int access_op,
 		return -EPERM;
 	}
 
-	reg = cfg->reg_base + data->pad_base + (raw_pin * 8);
+	reg = cfg->reg_base + data->pad_base + (raw_pin * 8U);
 	val = sys_read32(reg);
 
 	if (value) {
@@ -329,6 +332,7 @@ static int gpio_intel_apl_read(struct device *dev, int access_op,
 	if (pin > cfg->num_pins) {
 		return -EINVAL;
 	}
+	pin = k_array_index_sanitize(pin, cfg->num_pins + 1);
 
 	raw_pin = cfg->pin_offset + pin;
 
@@ -336,7 +340,7 @@ static int gpio_intel_apl_read(struct device *dev, int access_op,
 		return -EPERM;
 	}
 
-	reg = cfg->reg_base + data->pad_base + (raw_pin * 8);
+	reg = cfg->reg_base + data->pad_base + (raw_pin * 8U);
 	val = sys_read32(reg);
 
 	if (!(val & PAD_CFG0_TXDIS)) {
@@ -356,7 +360,7 @@ static int gpio_intel_apl_manage_callback(struct device *dev,
 {
 	struct gpio_intel_apl_data *data = dev->driver_data;
 
-	return _gpio_manage_callback(&data->cb, callback, set);
+	return gpio_manage_callback(&data->cb, callback, set);
 }
 
 static int gpio_intel_apl_enable_callback(struct device *dev,
@@ -372,6 +376,7 @@ static int gpio_intel_apl_enable_callback(struct device *dev,
 	if (pin > cfg->num_pins) {
 		return -EINVAL;
 	}
+	pin = k_array_index_sanitize(pin, cfg->num_pins + 1);
 
 	raw_pin = cfg->pin_offset + pin;
 
@@ -403,6 +408,7 @@ static int gpio_intel_apl_disable_callback(struct device *dev,
 	if (pin > cfg->num_pins) {
 		return -EINVAL;
 	}
+	pin = k_array_index_sanitize(pin, cfg->num_pins + 1);
 
 	raw_pin = cfg->pin_offset + pin;
 

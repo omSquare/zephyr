@@ -189,7 +189,7 @@ int log_printk(const char *fmt, va_list ap)
 
 			length = vsnprintk(formatted_str,
 					   sizeof(formatted_str), fmt, ap);
-			length = min(length, sizeof(formatted_str));
+			length = MIN(length, sizeof(formatted_str));
 
 			msg = log_msg_hexdump_create(NULL, formatted_str,
 						     length);
@@ -282,11 +282,18 @@ void log_hexdump_sync(struct log_msg_ids src_level, const char *metadata,
 
 static u32_t timestamp_get(void)
 {
-	return k_cycle_get_32();
+	if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC > 1000000) {
+		return k_uptime_get_32();
+	} else {
+		return k_cycle_get_32();
+	}
 }
 
 void log_core_init(void)
 {
+	u32_t freq = (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC > 1000000) ?
+			1000 : CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC;
+
 	if (!IS_ENABLED(CONFIG_LOG_IMMEDIATE)) {
 		log_msg_pool_init();
 		log_list_init(&list);
@@ -298,7 +305,7 @@ void log_core_init(void)
 
 	/* Set default timestamp. */
 	timestamp_func = timestamp_get;
-	log_output_timestamp_freq_set(CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC);
+	log_output_timestamp_freq_set(freq);
 
 	/*
 	 * Initialize aggregated runtime filter levels (no backends are
@@ -348,8 +355,11 @@ static void thread_set(k_tid_t process_tid)
 {
 	proc_tid = process_tid;
 
-	if (!IS_ENABLED(CONFIG_LOG_IMMEDIATE) &&
-	    CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD &&
+	if (IS_ENABLED(CONFIG_LOG_IMMEDIATE)) {
+		return;
+	}
+
+	if (CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD &&
 	    process_tid &&
 	    buffered_cnt >= CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD) {
 		k_wakeup(proc_tid);
@@ -439,8 +449,6 @@ static void msg_process(struct log_msg *msg, bool bypass)
 				log_backend_put(backend, msg);
 			}
 		}
-	} else {
-		atomic_inc(&dropped_cnt);
 	}
 
 	log_msg_put(msg);
@@ -486,6 +494,11 @@ bool log_process(bool bypass)
 u32_t log_buffered_cnt(void)
 {
 	return buffered_cnt;
+}
+
+void log_dropped(void)
+{
+	atomic_inc(&dropped_cnt);
 }
 
 u32_t log_src_cnt_get(u32_t domain_id)
@@ -536,7 +549,7 @@ u32_t log_filter_set(struct log_backend const *const backend,
 				backend = log_backend_get(i);
 				current = log_filter_set(backend, domain_id,
 							 src_id, level);
-				max = max(current, max);
+				max = MAX(current, max);
 			}
 
 			level = max;
@@ -544,7 +557,7 @@ u32_t log_filter_set(struct log_backend const *const backend,
 			u32_t max = log_filter_get(backend, domain_id,
 						   src_id, false);
 
-			level = min(level, max);
+			level = MIN(level, max);
 
 			LOG_FILTER_SLOT_SET(filters,
 					    log_backend_id_get(backend),
@@ -665,6 +678,8 @@ void log_free(void *str)
 
 static void log_process_thread_func(void *dummy1, void *dummy2, void *dummy3)
 {
+	__ASSERT_NO_MSG(log_backend_count_get() > 0);
+
 	log_init();
 	thread_set(k_current_get());
 

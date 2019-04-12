@@ -6,10 +6,9 @@
 
 
 menuconfig SPI_NOR
-	bool
-	prompt "SPI NOR Flash"
+	bool "SPI NOR Flash"
 	select FLASH_HAS_DRIVER_ENABLED
-	depends on SPI && FLASH
+	depends on SPI
 
 if SPI_NOR
 

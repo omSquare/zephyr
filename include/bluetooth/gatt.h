@@ -511,6 +511,11 @@ struct _bt_gatt_ccc {
 	u16_t			value;
 	void			(*cfg_changed)(const struct bt_gatt_attr *attr,
 					       u16_t value);
+	bool			(*cfg_write)(struct bt_conn *conn,
+					     const struct bt_gatt_attr *attr,
+					     u16_t value);
+	bool			(*cfg_match)(struct bt_conn *conn,
+					     const struct bt_gatt_attr *attr);
 };
 
 /** @brief Read Client Characteristic Configuration Attribute helper.
@@ -551,6 +556,26 @@ ssize_t bt_gatt_attr_write_ccc(struct bt_conn *conn,
 			       const struct bt_gatt_attr *attr, const void *buf,
 			       u16_t len, u16_t offset, u8_t flags);
 
+/** @def BT_GATT_CCC_MANAGED
+ *  @brief Managed Client Characteristic Configuration Declaration Macro.
+ *
+ *  Helper macro to declare a Managed CCC attribute.
+ *
+ *  @param _cfg Initial configuration.
+ *  @param _changed Configuration changed callback.
+ *  @param _write Configuration write callback.
+ *  @param _match Configuration match callback.
+ */
+#define BT_GATT_CCC_MANAGED(_cfg, _changed, _write, _match)		\
+	BT_GATT_ATTRIBUTE(BT_UUID_GATT_CCC,				\
+			BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,		\
+			bt_gatt_attr_read_ccc, bt_gatt_attr_write_ccc,	\
+			(&(struct _bt_gatt_ccc) { .cfg = _cfg,		\
+					       .cfg_len = ARRAY_SIZE(_cfg), \
+					       .cfg_changed = _changed, \
+					       .cfg_write = _write, \
+					       .cfg_match = _match }))
+
 /** @def BT_GATT_CCC
  *  @brief Client Characteristic Configuration Declaration Macro.
  *
@@ -560,12 +585,7 @@ ssize_t bt_gatt_attr_write_ccc(struct bt_conn *conn,
  *  @param _cfg_changed Configuration changed callback.
  */
 #define BT_GATT_CCC(_cfg, _cfg_changed)					\
-	BT_GATT_ATTRIBUTE(BT_UUID_GATT_CCC,				\
-			BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,		\
-			bt_gatt_attr_read_ccc, bt_gatt_attr_write_ccc,	\
-			(&(struct _bt_gatt_ccc) { .cfg = _cfg,		\
-					       .cfg_len = ARRAY_SIZE(_cfg), \
-					       .cfg_changed = _cfg_changed, }))
+	BT_GATT_CCC_MANAGED(_cfg, _cfg_changed, NULL, NULL)
 
 /** @brief Read Characteristic Extended Properties Attribute helper
  *
@@ -845,12 +865,37 @@ typedef u8_t (*bt_gatt_discover_func_t)(struct bt_conn *conn,
 					const struct bt_gatt_attr *attr,
 					struct bt_gatt_discover_params *params);
 
+/* GATT Discover types */
 enum {
+	/** Discover Primary Services. */
 	BT_GATT_DISCOVER_PRIMARY,
+	/** Discover Secondary Services. */
 	BT_GATT_DISCOVER_SECONDARY,
+	/** Discover Included Services. */
 	BT_GATT_DISCOVER_INCLUDE,
+	/** Discover Characteristic Values.
+	 *
+	 *  Discover Characteristic Value and its properties.
+	 */
 	BT_GATT_DISCOVER_CHARACTERISTIC,
+	/** Discover Descriptors.
+	 *
+	 *  Discover Attributes which are not services or characteristics.
+	 *
+	 *  Note: The use of this type of discover is not recommended for
+	 *  discovering in ranges across multiple services/characteristics
+	 *  as it may incur in extra round trips.
+	 */
 	BT_GATT_DISCOVER_DESCRIPTOR,
+	/** Discover Attributes.
+	 *
+	 *  Discover Attributes of any type.
+	 *
+	 *  Note: The use of this type of discover is not recommended for
+	 *  discovering in ranges across multiple services/characteristics as
+	 *  it may incur in more round trips.
+	 */
+	BT_GATT_DISCOVER_ATTRIBUTE,
 };
 
 /** @brief GATT Discover Attributes parameters */
@@ -1006,7 +1051,7 @@ int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params);
  * called.
  *
  * Note: By using a callback it also disable the internal flow control
- * which would prevent sending multiple commands without wainting their
+ * which would prevent sending multiple commands without waiting for their
  * transmissions to complete, so if that is required the caller shall not
  * submit more data until the callback is called.
  *

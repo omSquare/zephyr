@@ -14,7 +14,10 @@ LOG_MODULE_REGISTER(net_ethernet, CONFIG_NET_L2_ETHERNET_LOG_LEVEL);
 #include <net/ethernet.h>
 #include <net/ethernet_mgmt.h>
 #include <net/gptp.h>
+
+#if defined(CONFIG_NET_LLDP)
 #include <net/lldp.h>
+#endif
 
 #include "arp.h"
 #include "eth_stats.h"
@@ -259,7 +262,7 @@ static inline bool ethernet_ipv4_dst_is_broadcast_or_mcast(struct net_pkt *pkt)
 {
 	if (net_ipv4_is_addr_bcast(net_pkt_iface(pkt),
 				   &NET_IPV4_HDR(pkt)->dst) ||
-	    NET_IPV4_HDR(pkt)->dst.s4_addr[0] == 224) {
+	    NET_IPV4_HDR(pkt)->dst.s4_addr[0] == 224U) {
 		return true;
 	}
 
@@ -270,7 +273,7 @@ static bool ethernet_fill_in_dst_on_ipv4_mcast(struct net_pkt *pkt,
 					       struct net_eth_addr *dst)
 {
 	if (net_pkt_family(pkt) == AF_INET &&
-	    NET_IPV4_HDR(pkt)->dst.s4_addr[0] == 224) {
+	    NET_IPV4_HDR(pkt)->dst.s4_addr[0] == 224U) {
 		/* Multicast address */
 		dst->addr[0] = 0x01;
 		dst->addr[1] = 0x00;
@@ -448,6 +451,7 @@ static struct net_buf *ethernet_fill_header(struct ethernet_context *ctx,
 		hdr_vlan->type = ptype;
 		hdr_vlan->vlan.tpid = htons(NET_ETH_PTYPE_VLAN);
 		hdr_vlan->vlan.tci = htons(net_pkt_vlan_tci(pkt));
+		net_buf_add(hdr_frag, sizeof(struct net_eth_vlan_hdr));
 
 		print_vlan_ll_addrs(pkt, ntohs(hdr_vlan->type),
 				    net_pkt_vlan_tci(pkt),
@@ -955,18 +959,6 @@ int net_eth_promisc_mode(struct net_if *iface, bool enable)
 	return net_mgmt(NET_REQUEST_ETHERNET_SET_PROMISC_MODE, iface,
 			&params, sizeof(struct ethernet_req_params));
 }
-
-#if defined(CONFIG_NET_LLDP)
-int net_eth_set_lldpdu(struct net_if *iface, const struct net_lldpdu *lldpdu)
-{
-	return net_lldp_config(iface, lldpdu);
-}
-
-void net_eth_unset_lldpdu(struct net_if *iface)
-{
-	net_lldp_config(iface, NULL);
-}
-#endif
 
 void ethernet_init(struct net_if *iface)
 {

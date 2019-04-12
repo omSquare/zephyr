@@ -664,7 +664,7 @@ static int l2cap_br_conn_req_reply(struct bt_l2cap_chan *chan, u16_t result)
 
 	l2cap_br_send_conn_rsp(chan->conn, BR_CHAN(chan)->tx.cid,
 			       BR_CHAN(chan)->rx.cid, chan->ident, result);
-	chan->ident = 0;
+	chan->ident = 0U;
 
 	return 0;
 }
@@ -740,7 +740,7 @@ static void l2cap_br_conn_req(struct bt_l2cap_br *l2cap, u8_t ident,
 	atomic_set_bit(BR_CHAN(chan)->flags, L2CAP_FLAG_CONN_ACCEPTOR);
 
 	/* Disable fragmentation of l2cap rx pdu */
-	BR_CHAN(chan)->rx.mtu = min(BR_CHAN(chan)->rx.mtu, L2CAP_BR_MAX_MTU);
+	BR_CHAN(chan)->rx.mtu = MIN(BR_CHAN(chan)->rx.mtu, L2CAP_BR_MAX_MTU);
 
 	switch (l2cap_br_conn_security(chan, psm)) {
 	case L2CAP_CONN_SECURITY_PENDING:
@@ -1310,7 +1310,7 @@ static void l2cap_br_conn_rsp(struct bt_l2cap_br *l2cap, u8_t ident,
 
 	switch (result) {
 	case BT_L2CAP_BR_SUCCESS:
-		chan->ident = 0;
+		chan->ident = 0U;
 		BR_CHAN(chan)->tx.cid = dcid;
 		l2cap_br_conf(chan);
 		bt_l2cap_chan_set_state(chan, BT_L2CAP_CONFIG);

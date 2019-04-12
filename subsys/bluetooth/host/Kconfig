@@ -48,16 +48,20 @@ config BT_RX_BUF_LEN
 	  (4 bytes) and the ACL header (also 4 bytes) which yields 73 bytes.
 
 config BT_HCI_TX_STACK_SIZE
+	# NOTE: This value is derived from other symbols and should not be
+	# user-configurable. Do not give it a prompt.
 	int
 	default 512 if BT_H4
 	default 512 if BT_H5
 	default 416 if BT_SPI
-	default 940 if BT_CTLR && NO_OPTIMIZATIONS
-	default 640 if BT_CTLR
+	default 940 if BT_CTLR && (BT_LL_SW || BT_LL_SW_SPLIT) && NO_OPTIMIZATIONS
+	default 1024 if BT_CTLR && (BT_LL_SW || BT_LL_SW_SPLIT) && BT_CENTRAL
+	default 640 if BT_CTLR && (BT_LL_SW || BT_LL_SW_SPLIT)
 	default 512 if BT_USERCHAN
 	# Even if no driver is selected the following default is still
-	# needed e.g. for unit tests.
-	default 512
+	# needed e.g. for unit tests. This default will also server as
+	# the worst-case stack size if an out-of-tree controller is used.
+	default 1024
 	help
 	  Stack size needed for executing bt_send with specified driver
 
@@ -65,15 +69,6 @@ config BT_HCI_TX_PRIO
 	# Hidden option for Co-Operative Tx thread priority
 	int
 	default 7
-
-config BT_WAIT_NOP
-	bool "Wait for \"NOP\" Command Complete event during init"
-	depends on BT_HCI
-	help
-	  Some controllers emit a Command Complete event for the NOP
-	  opcode to indicate that they're ready to receive commands.
-	  This option should be selected if the controller used
-	  exhibits such behavior.
 
 config BT_HCI_RESERVE
 	int
@@ -157,7 +152,6 @@ config BT_SETTINGS
 if BT_SETTINGS
 config BT_SETTINGS_CCC_STORE_ON_WRITE
 	bool "Store CCC value immediately after it has been written"
-	default n
 	help
 	  Store Client Configuration Characteristic value right after it has
 	  been updated.
@@ -371,7 +365,6 @@ config BT_GATT_CACHING
 
 config BT_GATT_ENFORCE_CHANGE_UNAWARE
 	bool "GATT Enforce change-unaware state"
-	default n
 	depends on BT_GATT_CACHING
 	help
 	 When enable this option blocks notification and indications to client
@@ -420,12 +413,16 @@ if BT_GAP_PERIPHERAL_PREF_PARAMS
 config BT_PERIPHERAL_PREF_MIN_INT
 	int "Peripheral preferred minimum connection interval in 1.25ms units"
 	default 24
-	range 6 3200
+	range 6 65535
+	help
+	  Range 3200 to 65534 is invalid. 65535 represents no specific value.
 
 config BT_PERIPHERAL_PREF_MAX_INT
 	int "Peripheral preferred maximum connection interval in 1.25ms units"
 	default 40
-	range 6 3200
+	range 6 65535
+	help
+	  Range 3200 to 65534 is invalid. 65535 represents no specific value.
 
 config BT_PERIPHERAL_PREF_SLAVE_LATENCY
 	int "Peripheral preferred slave latency in Connection Intervals"
@@ -435,12 +432,13 @@ config BT_PERIPHERAL_PREF_SLAVE_LATENCY
 config BT_PERIPHERAL_PREF_TIMEOUT
 	int "Peripheral preferred supervision timeout in 10ms units"
 	default 42
-	range 10 3200
+	range 10 65535
 	help
 	  It is up to user to provide valid timeout which pass required minimum
 	  value: in milliseconds it shall be larger than
 	  "(1+ Conn_Latency) * Conn_Interval_Max * 2"
 	  where Conn_Interval_Max is given in milliseconds.
+	  Range 3200 to 65534 is invalid. 65535 represents no specific value.
 endif # BT_GAP_PERIPHERAL_PREF_PARAMS
 
 config BT_CREATE_CONN_TIMEOUT

@@ -26,7 +26,7 @@ extern const struct socket_op_vtable sock_fd_op_vtable;
 
 static const struct socket_op_vtable packet_sock_fd_op_vtable;
 
-static inline int _k_fifo_wait_non_empty(struct k_fifo *fifo, int32_t timeout)
+static inline int k_fifo_wait_non_empty(struct k_fifo *fifo, int32_t timeout)
 {
 	struct k_poll_event events[] = {
 		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
@@ -69,7 +69,7 @@ int zpacket_socket(int family, int type, int proto)
 	/* Set net context object as initialized and grant access to the
 	 * calling thread (and only the calling thread)
 	 */
-	_k_object_recycle(ctx);
+	z_object_recycle(ctx);
 #endif
 
 	z_finalize_fd(fd, ctx,
@@ -166,9 +166,8 @@ ssize_t zpacket_sendto_ctx(struct net_context *ctx, const void *buf, size_t len,
 		return -1;
 	}
 
-	status = net_context_sendto_new(ctx, buf, len, dest_addr,
-					addrlen, NULL, timeout, NULL,
-					ctx->user_data);
+	status = net_context_sendto(ctx, buf, len, dest_addr, addrlen,
+				    NULL, timeout, ctx->user_data);
 	if (status < 0) {
 		errno = -status;
 		return -1;
@@ -192,7 +191,7 @@ ssize_t zpacket_recvfrom_ctx(struct net_context *ctx, void *buf, size_t max_len,
 	if (flags & ZSOCK_MSG_PEEK) {
 		int res;
 
-		res = _k_fifo_wait_non_empty(&ctx->recv_q, timeout);
+		res = k_fifo_wait_non_empty(&ctx->recv_q, timeout);
 		/* EAGAIN when timeout expired, EINTR when cancelled */
 		if (res && res != -EAGAIN && res != -EINTR) {
 			errno = -res;
@@ -217,7 +216,7 @@ ssize_t zpacket_recvfrom_ctx(struct net_context *ctx, void *buf, size_t max_len,
 		recv_len = max_len;
 	}
 
-	if (net_pkt_read_new(pkt, buf, recv_len)) {
+	if (net_pkt_read(pkt, buf, recv_len)) {
 		errno = ENOBUFS;
 		return -1;
 	}

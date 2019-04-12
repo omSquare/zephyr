@@ -17,6 +17,7 @@
 		zephyr,console = &uart0;
 		zephyr,shell-uart = &uart0;
 		zephyr,uart-mcumgr = &uart0;
+		zephyr,bt-mon-uart = &uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &slot0_partition;
@@ -87,6 +88,12 @@
 	status = "ok";
 	sda-pin = <30>;
 	scl-pin = <31>;
+};
+
+&pwm0 {
+	status = "ok";
+	ch0-pin = <22>;
+	ch0-inverted;
 };
 
 &flash0 {

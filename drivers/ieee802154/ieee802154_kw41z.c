@@ -465,17 +465,17 @@ static int kw41z_stop(struct device *dev)
 
 static u8_t kw41z_convert_lqi(u8_t hw_lqi)
 {
-	if (hw_lqi >= 220) {
+	if (hw_lqi >= 220U) {
 		return 255;
 	} else {
-		return (51 * hw_lqi) / 44;
+		return (hw_lqi * 51U) / 44;
 	}
 }
 
 static inline void kw41z_rx(struct kw41z_context *kw41z, u8_t len)
 {
 	struct net_pkt *pkt = NULL;
-	struct net_buf *frag = NULL;
+	struct net_buf *buf = NULL;
 	u8_t pkt_len, hw_lqi;
 	int rslt;
 
@@ -490,28 +490,23 @@ static inline void kw41z_rx(struct kw41z_context *kw41z, u8_t len)
 	pkt_len = len - KW41Z_FCS_LENGTH;
 #endif
 
-	pkt = net_pkt_get_reserve_rx(K_NO_WAIT);
+	pkt = net_pkt_alloc_with_buffer(kw41z->iface, pkt_len,
+					AF_UNSPEC, 0, K_NO_WAIT);
 	if (!pkt) {
 		LOG_ERR("No buf available");
 		goto out;
 	}
 
-	frag = net_pkt_get_frag(pkt, K_NO_WAIT);
-	if (!frag) {
-		LOG_ERR("No frag available");
-		goto out;
-	}
-
-	net_pkt_frag_insert(pkt, frag);
+	buf = pkt->buffer;
 
 #if CONFIG_SOC_MKW41Z4
 	/* PKT_BUFFER_RX needs to be accessed aligned to 16 bits */
 	for (u16_t reg_val = 0, i = 0; i < pkt_len; i++) {
-		if (i % 2 == 0) {
-			reg_val = ZLL->PKT_BUFFER_RX[i/2];
-			frag->data[i] = reg_val & 0xFF;
+		if (i % 2 == 0U) {
+			reg_val = ZLL->PKT_BUFFER_RX[i/2U];
+			buf->data[i] = reg_val & 0xFF;
 		} else {
-			frag->data[i] = reg_val >> 8;
+			buf->data[i] = reg_val >> 8;
 		}
 	}
 #else /* CONFIG_SOC_MKW40Z4 */
@@ -519,22 +514,22 @@ static inline void kw41z_rx(struct kw41z_context *kw41z, u8_t len)
 	for (u32_t reg_val = 0, i = 0; i < pkt_len; i++) {
 		switch (i % 4) {
 		case 0:
-			reg_val = ZLL->PKT_BUFFER[i/4];
-			frag->data[i] = reg_val & 0xFF;
+			reg_val = ZLL->PKT_BUFFER[i/4U];
+			buf->data[i] = reg_val & 0xFF;
 			break;
 		case 1:
-			frag->data[i] = (reg_val >> 8) & 0xFF;
+			buf->data[i] = (reg_val >> 8) & 0xFF;
 			break;
 		case 2:
-			frag->data[i] = (reg_val >> 16) & 0xFF;
+			buf->data[i] = (reg_val >> 16) & 0xFF;
 			break;
 		default:
-			frag->data[i] = reg_val >> 24;
+			buf->data[i] = reg_val >> 24;
 		}
 	}
 #endif
 
-	net_buf_add(frag, pkt_len);
+	net_buf_add(buf, pkt_len);
 
 	hw_lqi = (ZLL->LQI_AND_RSSI & ZLL_LQI_AND_RSSI_LQI_VALUE_MASK) >>
 		 ZLL_LQI_AND_RSSI_LQI_VALUE_SHIFT;
@@ -709,7 +704,7 @@ static void kw41z_isr(int unused)
 			 * frame, 1 frame length, 2 frame control,
 			 * 1 sequence, 2 FCS. Times two to convert to symbols.
 			 */
-			rx_len = rx_len * 2 + 12 + 22 + 2;
+			rx_len = rx_len * 2U + 12 + 22 + 2;
 			kw41z_tmr3_set_timeout(rx_len);
 		}
 		restart_rx = 0U;
@@ -770,7 +765,7 @@ static void kw41z_isr(int unused)
 					  ZLL_IRQSTS_RX_FRAME_LENGTH_SHIFT;
 
 				if (irqsts & ZLL_IRQSTS_RXIRQ_MASK) {
-					if (rx_len != 0) {
+					if (rx_len != 0U) {
 						kw41z_rx(&kw41z_context_data,
 							rx_len);
 					}

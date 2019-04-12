@@ -8,14 +8,14 @@
 
 /*macro definition*/
 #define INIT_COOP_PRIO -2
-#define INIT_COOP_STACK_SIZE 500
+#define INIT_COOP_STACK_SIZE (500 + CONFIG_TEST_EXTRA_STACKSIZE)
 #define INIT_COOP_P1 ((void *)0xFFFF0000)
 #define INIT_COOP_P2 ((void *)0xCDEF)
 #define INIT_COOP_P3 ((void *)0x1234)
 #define INIT_COOP_OPTION (K_USER | K_INHERIT_PERMS)
 #define INIT_COOP_DELAY 2000
 #define INIT_PREEMPT_PRIO 1
-#define INIT_PREEMPT_STACK_SIZE 499
+#define INIT_PREEMPT_STACK_SIZE (499 + CONFIG_TEST_EXTRA_STACKSIZE)
 #define INIT_PREEMPT_P1 ((void *)5)
 #define INIT_PREEMPT_P2 ((void *)6)
 #define INIT_PREEMPT_P3 ((void *)7)
@@ -207,7 +207,7 @@ void test_main(void)
 {
 	k_thread_access_grant(k_current_get(), &thread_preempt, &stack_preempt,
 			      &start_sema, &end_sema);
-#ifdef CONFIG_APP_SHARED_MEM
+#ifdef CONFIG_USERSPACE
 	k_mem_domain_add_thread(&ztest_mem_domain, T_KDEFINE_COOP_THREAD);
 	k_mem_domain_add_thread(&ztest_mem_domain, T_KDEFINE_PREEMPT_THREAD);
 #endif

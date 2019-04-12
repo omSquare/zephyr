@@ -61,7 +61,7 @@ static inline int socket_can_send(struct device *dev, struct net_pkt *pkt)
 	}
 
 	ret = can_send(socket_context->can_dev,
-		       (struct can_msg *)pkt->frags->data,
+		       (struct zcan_frame *)pkt->frags->data,
 		       SEND_TIMEOUT, tx_irq_callback);
 	if (ret) {
 		LOG_DBG("Cannot send socket CAN msg (%d)", ret);
@@ -85,10 +85,7 @@ static inline int socket_can_setsockopt(struct device *dev, void *obj,
 		return -1;
 	}
 
-	if (optlen != sizeof(struct can_filter)) {
-		errno = EINVAL;
-		return -1;
-	}
+	__ASSERT_NO_MSG(optlen == sizeof(struct zcan_filter));
 
 	ret = can_attach_msgq(socket_context->can_dev, socket_context->msgq,
 			      optval);
@@ -112,7 +109,7 @@ static inline void rx_thread(void *ctx, void *unused1, void *unused2)
 {
 	struct socket_can_context *socket_context = ctx;
 	struct net_pkt *pkt;
-	struct can_msg msg;
+	struct zcan_frame msg;
 	int ret;
 
 	ARG_UNUSED(unused1);
@@ -131,7 +128,7 @@ static inline void rx_thread(void *ctx, void *unused1, void *unused2)
 			continue;
 		}
 
-		if (net_pkt_write_new(pkt, (void *)&msg, sizeof(msg))) {
+		if (net_pkt_write(pkt, (void *)&msg, sizeof(msg))) {
 			LOG_ERR("Failed to append RX data");
 			net_pkt_unref(pkt);
 			continue;

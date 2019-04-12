@@ -75,7 +75,7 @@ Connections and IOs
 ====================
 
 Peripherals on the CC3220SF LaunchXL are mapped to the following pins in
-the file :file:`boards/arm/cc3220sf_launchxl/pinmux.c`.
+the file :zephyr_file:`boards/arm/cc3220sf_launchxl/pinmux.c`.
 
 +------------+-------+-------+
 | Function   | PIN   | GPIO  |
@@ -96,7 +96,7 @@ the file :file:`boards/arm/cc3220sf_launchxl/pinmux.c`.
 +------------+-------+-------+
 
 The default configuration can be found in the Kconfig file at
-:file:`boards/arm/cc3220sf_launchxl/cc3220sf_launchxl_defconfig`.
+:zephyr_file:`boards/arm/cc3220sf_launchxl/cc3220sf_launchxl_defconfig`.
 
 
 Programming and Debugging
@@ -162,7 +162,7 @@ Prerequisites:
    and /usr/local/share/, you may want to backup any current openocd
    installations there.
    If you decide to change the default installation location, also update
-   the OPENOCD path variable in :file:`boards/arm/cc3220sf_launchxl/board.cmake`.
+   the OPENOCD path variable in :zephyr_file:`boards/arm/cc3220sf_launchxl/board.cmake`.
 
 #. Ensure CONFIG_XIP=y (default) is set.
 
@@ -219,14 +219,14 @@ WiFi Support
 The SimpleLink Host Driver, imported from the SimpleLink SDK, has been ported
 to Zephyr, and communicates over a dedicated SPI to the network co-processor.
 It is available as a Zephyr WiFi device driver in
-:file:`drivers/wifi/simplelink`.
+:zephyr_file:`drivers/wifi/simplelink`.
 
 Usage:
 ======
 
 Set :option:`CONFIG_WIFI_SIMPLELINK` and :option:`CONFIG_WIFI` to ``y``
 to enable WiFi.
-See :file:`samples/net/wifi/boards/cc3220sf_launchxl.conf`.
+See :zephyr_file:`samples/net/wifi/boards/cc3220sf_launchxl.conf`.
 
 Provisioning:
 =============
@@ -265,11 +265,23 @@ and enabled by:
   Root-Certificate Catalog.
 
 See :ref:`sockets-http-get` and
-:file:`samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf` for an
+:zephyr_file:`samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf` for an
 example.
 
 See the document `Simplelink WiFi Certificates Handling`_ for details on
 using the TI UniFlash tool for certificate programming.
+
+Limitations
+***********
+The following features are not supported in Zephyr v1.14:
+
+- IPv6: While the hardware supports it, it has yet to be fully implemented
+  in the SimpleLink WiFi driver.
+- static IP address: It is not currently possible to set
+  :option:`CONFIG_NET_CONFIG_SETTINGS` to ``y`` and assign a static IP
+  address to the device via :option:`CONFIG_NET_CONFIG_MY_IPV4_ADDR`. DHCP
+  is automatically handled by the SimpleLink WiFi driver to obtain an
+  address dynamically.
 
 References
 **********

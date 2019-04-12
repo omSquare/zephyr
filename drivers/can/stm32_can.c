@@ -37,7 +37,7 @@ static void can_stm32_signal_tx_complete(struct can_mailbox *mb)
 }
 
 static void can_stm32_get_msg_fifo(CAN_FIFOMailBox_TypeDef *mbox,
-				    struct can_msg *msg)
+				    struct zcan_frame *msg)
 {
 	if (mbox->RIR & CAN_RI0R_IDE) {
 		msg->ext_id = mbox->RIR >> CAN_RI0R_EXID_Pos;
@@ -58,7 +58,7 @@ void can_stm32_rx_isr_handler(CAN_TypeDef *can, struct can_stm32_data *data)
 {
 	CAN_FIFOMailBox_TypeDef *mbox;
 	int filter_match_index;
-	struct can_msg msg;
+	struct zcan_frame msg;
 
 	while (can->RF0R & CAN_RF0R_FMP0) {
 		mbox = &can->sFIFOMailBox[0];
@@ -210,19 +210,24 @@ int can_stm32_runtime_configure(struct device *dev, enum can_mode mode,
 	u32_t bs1;
 	u32_t bs2;
 	u32_t sjw;
+	int ret;
 
 	clock = device_get_binding(STM32_CLOCK_CONTROL_NAME);
 	__ASSERT_NO_MSG(clock);
 	hcan.Instance = can;
+	ret = clock_control_get_rate(clock, (clock_control_subsys_t *) &cfg->pclken,
+				     &clock_rate);
+	if (ret != 0) {
+		LOG_ERR("Failed call clock_control_get_rate: return [%d]", ret);
+		return -EIO;
+	}
 
-	clock_control_get_rate(clock, (clock_control_subsys_t *) &cfg->pclken,
-			       &clock_rate);
 	if (!bitrate) {
 		bitrate = cfg->bus_speed;
 	}
 
 	prescaler = clock_rate / (BIT_SEG_LENGTH(cfg) * bitrate);
-	if (prescaler == 0 || prescaler > 1024) {
+	if (prescaler == 0U || prescaler > 1024) {
 		LOG_ERR("HAL_CAN_Init failed: prescaler > max (%d > 1024)",
 					prescaler);
 		return -EINVAL;
@@ -319,8 +324,8 @@ static int can_stm32_init(struct device *dev)
 	return 0;
 }
 
-int can_stm32_send(struct device *dev, struct can_msg *msg, s32_t timeout,
-		   can_tx_callback_t callback)
+int can_stm32_send(struct device *dev, const struct zcan_frame *msg,
+		   s32_t timeout, can_tx_callback_t callback)
 {
 	const struct can_stm32_config *cfg = DEV_CFG(dev);
 	struct can_stm32_data *data = DEV_DATA(dev);
@@ -341,7 +346,7 @@ int can_stm32_send(struct device *dev, struct can_msg *msg, s32_t timeout,
 		    "standard" : "extended"
 		    , msg->rtr == CAN_DATAFRAME ? "no" : "yes");
 
-	__ASSERT(msg->dlc == 0 || msg->data != NULL, "Dataptr is null");
+	__ASSERT(msg->dlc == 0U || msg->data != NULL, "Dataptr is null");
 	__ASSERT(msg->dlc <= CAN_MAX_DLC, "DLC > 8");
 
 	if (can->ESR & CAN_ESR_BOFF) {
@@ -578,21 +583,21 @@ static inline void can_stm32_set_mode_scale(enum can_filter_type filter_type,
 	*scale_reg |= scale_reg_bit;
 }
 
-static inline u32_t can_generate_std_mask(const struct can_filter *filter)
+static inline u32_t can_generate_std_mask(const struct zcan_filter *filter)
 {
 	return  (filter->std_id_mask << CAN_FIRX_STD_ID_POS) |
 		(filter->rtr_mask    << CAN_FIRX_STD_RTR_POS) |
 		(1U                  << CAN_FIRX_STD_IDE_POS);
 }
 
-static inline u32_t can_generate_ext_mask(const struct can_filter *filter)
+static inline u32_t can_generate_ext_mask(const struct zcan_filter *filter)
 {
 	return  (filter->ext_id_mask << CAN_FIRX_EXT_EXT_ID_POS) |
 		(filter->rtr_mask    << CAN_FIRX_EXT_RTR_POS) |
 		(1U                  << CAN_FIRX_EXT_IDE_POS);
 }
 
-static inline u32_t can_generate_std_id(const struct can_filter *filter)
+static inline u32_t can_generate_std_id(const struct zcan_filter *filter)
 {
 
 	return  (filter->std_id << CAN_FIRX_STD_ID_POS) |
@@ -600,14 +605,14 @@ static inline u32_t can_generate_std_id(const struct can_filter *filter)
 
 }
 
-static inline u32_t can_generate_ext_id(const struct can_filter *filter)
+static inline u32_t can_generate_ext_id(const struct zcan_filter *filter)
 {
 	return  (filter->ext_id << CAN_FIRX_EXT_EXT_ID_POS) |
 		(filter->rtr    << CAN_FIRX_EXT_RTR_POS) |
 		(1U             << CAN_FIRX_EXT_IDE_POS);
 }
 
-static inline int can_stm32_set_filter(const struct can_filter *filter,
+static inline int can_stm32_set_filter(const struct zcan_filter *filter,
 				       struct can_stm32_data *device_data,
 				       CAN_TypeDef *can,
 				       int *filter_index)
@@ -655,7 +660,7 @@ static inline int can_stm32_set_filter(const struct can_filter *filter,
 
 	do {
 		u64_t usage_shifted = (device_data->filter_usage >> filter_nr);
-		u64_t usage_demand_mask = (1U << register_demand) - 1;
+		u64_t usage_demand_mask = (1ULL << register_demand) - 1;
 		bool bank_is_empty;
 
 		bank_nr = filter_nr / 4;
@@ -702,19 +707,23 @@ static inline int can_stm32_set_filter(const struct can_filter *filter,
 							 scale_reg);
 
 		start_index = filter_index_new + filter_in_bank[bank_mode];
-		res = can_stm32_shift_arr(device_data->rx_response,
-					  start_index,
-					  shift_width);
 
-		if (filter_index_new >= CONFIG_CAN_MAX_FILTER || res) {
-			LOG_INF("No space for a new filter!");
-			filter_nr = CAN_NO_FREE_FILTER;
-			goto done;
+		if (shift_width && start_index <= CAN_MAX_NUMBER_OF_FILTERS) {
+			res = can_stm32_shift_arr(device_data->rx_response,
+						start_index,
+						shift_width);
+
+			if (filter_index_new >= CONFIG_CAN_MAX_FILTER || res) {
+				LOG_INF("No space for a new filter!");
+				filter_nr = CAN_NO_FREE_FILTER;
+				goto done;
+			}
+
+			can_stm32_shift_bits(&device_data->response_type,
+					start_index,
+					shift_width);
 		}
 
-		can_stm32_shift_bits(&device_data->response_type,
-				     start_index,
-				     shift_width);
 		can->FM1R = mode_reg;
 		can->FS1R = scale_reg;
 	} else {
@@ -739,7 +748,7 @@ done:
 
 
 static inline int can_stm32_attach(struct device *dev, void *response_ptr,
-				   const struct can_filter *filter,
+				   const struct zcan_filter *filter,
 				   int *filter_index)
 {
 	const struct can_stm32_config *cfg = DEV_CFG(dev);
@@ -758,7 +767,7 @@ static inline int can_stm32_attach(struct device *dev, void *response_ptr,
 }
 
 int can_stm32_attach_msgq(struct device *dev, struct k_msgq *msgq,
-			  const struct can_filter *filter)
+			  const struct zcan_filter *filter)
 {
 	int filter_nr;
 	int filter_index;
@@ -772,7 +781,7 @@ int can_stm32_attach_msgq(struct device *dev, struct k_msgq *msgq,
 }
 
 int can_stm32_attach_isr(struct device *dev, can_rx_callback_t isr,
-			 const struct can_filter *filter)
+			 const struct zcan_filter *filter)
 {
 	struct can_stm32_data *data = DEV_DATA(dev);
 	int filter_nr;

@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <app_memory/app_memdomain.h>
 #include <misc/util.h>
+#include <misc/stack.h>
+#include <syscall_handler.h>
+#include "test_syscall.h"
 
 #if defined(CONFIG_ARC)
 #include <arch/arc/v2/mpu/arc_core_mpu.h>
@@ -35,10 +38,10 @@ K_SEM_DEFINE(expect_fault_sem, 0, 1);
 
 /*
  * Create partitions. part0 is for all variables to run
- * ztest and this test suite. part1 and part2 are for
+ * ztest and this test suite. part1 is for
  * subsequent test specifically for this new implementation.
  */
-FOR_EACH(K_APPMEM_PARTITION_DEFINE, part0, part1, part2);
+FOR_EACH(K_APPMEM_PARTITION_DEFINE, part0, part1);
 
 /*
  * Create memory domains. dom0 is for the ztest and this
@@ -76,14 +79,14 @@ K_APP_BMEM(part0) static volatile unsigned int expected_reason;
 #define BARRIER() k_sem_give(&expect_fault_sem)
 
 /* ARM is a special case, in that k_thread_abort() does indeed return
- * instead of calling _Swap() directly. The PendSV exception is queued
+ * instead of calling z_swap() directly. The PendSV exception is queued
  * and immediately fires upon completing the exception path; the faulting
  * thread is never run again.
  */
 #if !(defined(CONFIG_ARM) || defined(CONFIG_ARC))
 FUNC_NORETURN
 #endif
-void _SysFatalErrorHandler(unsigned int reason, const NANO_ESF *pEsf)
+void z_SysFatalErrorHandler(unsigned int reason, const NANO_ESF *pEsf)
 {
 	INFO("Caught system error -- reason %d\n", reason);
 	/*
@@ -271,7 +274,7 @@ static void write_kerntext(void)
 	expect_fault = true;
 	expected_reason = REASON_HW_EXCEPTION;
 	BARRIER();
-	memcpy(&_is_thread_essential, 0, 4);
+	memset(&z_is_thread_essential, 0, 4);
 	zassert_unreachable("Write to kernel text did not fault");
 }
 
@@ -470,7 +473,7 @@ static void read_other_stack(void)
 	k_sem_take(&uthread_start_sem, K_FOREVER);
 
 	/* Try to directly read the stack of the other thread. */
-	ptr = (unsigned int *)K_THREAD_STACK_BUFFER(uthread_stack);
+	ptr = (unsigned int *)Z_THREAD_STACK_BUFFER(uthread_stack);
 	expect_fault = true;
 	expected_reason = REASON_HW_EXCEPTION;
 	BARRIER();
@@ -503,7 +506,7 @@ static void write_other_stack(void)
 	k_sem_take(&uthread_start_sem, K_FOREVER);
 
 	/* Try to directly write the stack of the other thread. */
-	ptr = (unsigned int *) K_THREAD_STACK_BUFFER(uthread_stack);
+	ptr = (unsigned int *) Z_THREAD_STACK_BUFFER(uthread_stack);
 	expect_fault = true;
 	expected_reason = REASON_HW_EXCEPTION;
 	BARRIER();
@@ -650,14 +653,13 @@ static void shared_mem_thread(void)
  */
 static void access_other_memdomain(void)
 {
-	struct k_mem_partition *parts[] = {&part0, &part2};
+	struct k_mem_partition *parts[] = {&part0};
 	/*
 	 * Following tests the ability for a thread to access data
 	 * in a domain that it is denied.
 	 */
 
-	/* initialize domain dom1 with partition part2 */
-	k_mem_domain_init(&dom1, 2, parts);
+	k_mem_domain_init(&dom1, ARRAY_SIZE(parts), parts);
 
 	/* remove current thread from domain dom0 and add to dom1 */
 	k_mem_domain_remove_thread(k_current_get());
@@ -674,9 +676,414 @@ static void access_other_memdomain(void)
 
 
 #if defined(CONFIG_ARM)
-extern u8_t *_k_priv_stack_find(void *obj);
+extern u8_t *z_priv_stack_find(void *obj);
 extern k_thread_stack_t ztest_thread_stack[];
 #endif
+
+struct k_mem_domain add_thread_drop_dom;
+struct k_mem_domain add_part_drop_dom;
+struct k_mem_domain remove_thread_drop_dom;
+struct k_mem_domain remove_part_drop_dom;
+
+struct k_mem_domain add_thread_ctx_dom;
+struct k_mem_domain add_part_ctx_dom;
+struct k_mem_domain remove_thread_ctx_dom;
+struct k_mem_domain remove_part_ctx_dom;
+
+K_APPMEM_PARTITION_DEFINE(access_part);
+K_APP_BMEM(access_part) volatile bool test_bool;
+
+static void user_half(void *arg1, void *arg2, void *arg3)
+{
+	test_bool = 1;
+	if (!expect_fault) {
+		ztest_test_pass();
+	} else {
+		ztest_test_fail();
+	}
+}
+
+/**
+ * Show that changing between memory domains and dropping to user mode works
+ * as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_add_thread_drop_to_user(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = false;
+	k_mem_domain_init(&add_thread_drop_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_add_thread(&add_thread_drop_dom, k_current_get());
+
+	k_thread_user_mode_enter(user_half, NULL, NULL, NULL);
+}
+
+/* Show that adding a partition to a domain and then dropping to user mode
+ * works as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_add_part_drop_to_user(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &ztest_mem_partition};
+
+	expect_fault = false;
+	k_mem_domain_init(&add_part_drop_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&add_part_drop_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_add_partition(&add_part_drop_dom, &access_part);
+
+	k_thread_user_mode_enter(user_half, NULL, NULL, NULL);
+}
+
+/* Show that self-removing from a memory domain and then dropping to user
+ * mode faults as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_remove_thread_drop_to_user(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = true;
+	expected_reason = REASON_HW_EXCEPTION;
+	k_mem_domain_init(&remove_thread_drop_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&remove_thread_drop_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_remove_thread(k_current_get());
+
+	k_thread_user_mode_enter(user_half, NULL, NULL, NULL);
+}
+
+/**
+ * Show that self-removing a partition from a domain we are a membed of,
+ * and then dropping to user mode faults as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_remove_part_drop_to_user(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = true;
+	expected_reason = REASON_HW_EXCEPTION;
+	k_mem_domain_init(&remove_part_drop_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&remove_part_drop_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_remove_partition(&remove_part_drop_dom, &access_part);
+
+	k_thread_user_mode_enter(user_half, NULL, NULL, NULL);
+}
+
+static void user_ctx_switch_half(void *arg1, void *arg2, void *arg3)
+{
+	test_bool = 1;
+	k_sem_give(&uthread_end_sem);
+}
+
+static void spawn_user(void)
+{
+	k_sem_reset(&uthread_end_sem);
+	k_object_access_grant(&uthread_end_sem, k_current_get());
+
+	k_thread_create(&kthread_thread, kthread_stack, STACKSIZE,
+			user_ctx_switch_half, NULL, NULL, NULL,
+			K_PRIO_PREEMPT(1), K_INHERIT_PERMS | K_USER,
+			K_NO_WAIT);
+
+	k_sem_take(&uthread_end_sem, K_FOREVER);
+	if (expect_fault) {
+		ztest_test_fail();
+	}
+}
+
+/**
+ * Show that changing between memory domains and then switching to another
+ * thread in the same domain works as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_add_thread_context_switch(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = false;
+	k_mem_domain_init(&add_thread_ctx_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_add_thread(&add_thread_ctx_dom, k_current_get());
+
+	spawn_user();
+}
+
+/* Show that adding a partition to a domain and then switching to another
+ * user thread in the same domain works as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_add_part_context_switch(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &ztest_mem_partition};
+
+	expect_fault = false;
+	k_mem_domain_init(&add_part_ctx_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&add_part_ctx_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_add_partition(&add_part_ctx_dom, &access_part);
+
+	spawn_user();
+}
+
+/* Show that self-removing from a memory domain and then switching to another
+ * user thread in the same domain faults as expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_remove_thread_context_switch(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = true;
+	expected_reason = REASON_HW_EXCEPTION;
+	k_mem_domain_init(&remove_thread_ctx_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&remove_thread_ctx_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_remove_thread(k_current_get());
+
+	spawn_user();
+}
+
+/**
+ * Show that self-removing a partition from a domain we are a member of,
+ * and then switching to another user thread in the same domain faults as
+ * expected.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+static void domain_remove_part_context_switch(void)
+{
+	struct k_mem_partition *parts[] = {&part0, &access_part,
+					   &ztest_mem_partition};
+
+	expect_fault = true;
+	expected_reason = REASON_HW_EXCEPTION;
+	k_mem_domain_init(&remove_part_ctx_dom, ARRAY_SIZE(parts), parts);
+	k_mem_domain_remove_thread(k_current_get());
+	k_mem_domain_add_thread(&remove_part_ctx_dom, k_current_get());
+
+	k_sleep(1);
+	k_mem_domain_remove_partition(&remove_part_ctx_dom, &access_part);
+
+	spawn_user();
+}
+
+/*
+ * Stack testing
+ */
+
+#define NUM_STACKS	3
+#define STEST_STACKSIZE	1024
+K_THREAD_STACK_DEFINE(stest_stack, STEST_STACKSIZE);
+K_THREAD_STACK_ARRAY_DEFINE(stest_stack_array, NUM_STACKS, STEST_STACKSIZE);
+
+struct foo {
+	int bar;
+	K_THREAD_STACK_MEMBER(stack, STEST_STACKSIZE);
+	int baz;
+};
+
+struct foo stest_member_stack;
+
+void z_impl_stack_info_get(u32_t *start_addr, u32_t *size)
+{
+	*start_addr = k_current_get()->stack_info.start;
+	*size = k_current_get()->stack_info.size;
+}
+
+Z_SYSCALL_HANDLER(stack_info_get, start_addr, size)
+{
+	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(start_addr, sizeof(u32_t)));
+	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(size, sizeof(u32_t)));
+
+	z_impl_stack_info_get((u32_t *)start_addr, (u32_t *)size);
+
+	return 0;
+}
+
+int z_impl_check_perms(void *addr, size_t size, int write)
+{
+	return z_arch_buffer_validate(addr, size, write);
+}
+
+Z_SYSCALL_HANDLER(check_perms, addr, size, write)
+{
+	return z_impl_check_perms((void *)addr, size, write);
+}
+
+void stack_buffer_scenarios(k_thread_stack_t *stack_obj, size_t obj_size)
+{
+	size_t stack_size;
+	u8_t val;
+	char *stack_start, *stack_ptr, *stack_end, *obj_start, *obj_end;
+	volatile char *pos;
+
+	expect_fault = false;
+
+
+	/* Dump interesting information */
+
+	stack_info_get((u32_t *)&stack_start, (u32_t *)&stack_size);
+	printk("   - Thread reports buffer %p size %zu\n", stack_start,
+	       stack_size);
+
+	stack_end = stack_start + stack_size;
+	obj_end = (char *)stack_obj + obj_size;
+	obj_start = (char *)stack_obj;
+
+	/* Assert that the created stack object, with the reserved data
+	 * removed, can hold a thread buffer of STEST_STACKSIZE
+	 */
+	zassert_true(STEST_STACKSIZE <= (obj_size - K_THREAD_STACK_RESERVED),
+		      "bad stack size in object");
+
+	/* Check that the stack info in the thread marks a region
+	 * completely contained within the stack object
+	 */
+	zassert_true(stack_end <= obj_end,
+		     "stack size in thread struct out of bounds (overflow)");
+	zassert_true(stack_start >= obj_start,
+		     "stack size in thread struct out of bounds (underflow)");
+
+	/* Check that the entire stack buffer is read/writable */
+	printk("   - check read/write to stack buffer\n");
+
+	/* Address of this stack variable is guaranteed to part of
+	 * the active stack, and close to the actual stack pointer.
+	 * Some CPUs have hardware stack overflow detection which
+	 * faults on memory access within the stack buffer but below
+	 * the stack pointer.
+	 *
+	 * First test does direct read & write starting at the estimated
+	 * stack pointer up to the highest addresses in the buffer
+	 */
+	stack_ptr = &val;
+	for (pos = stack_ptr; pos < stack_end; pos++) {
+		/* pos is volatile so this doesn't get optimized out */
+		val = *pos;
+		*pos = val;
+	}
+
+	if (z_arch_is_user_context()) {
+		/* If we're in user mode, check every byte in the stack buffer
+		 * to ensure that the thread has permissions on it.
+		 */
+		for (pos = stack_start; pos < stack_end; pos++) {
+			zassert_false(check_perms((void *)pos, 1, 1),
+				      "bad MPU/MMU permission on stack buffer at address %p",
+				      pos);
+		}
+
+		/* Bounds check the user accessible area, it shouldn't extend
+		 * before or after the stack. Because of memory protection HW
+		 * alignment constraints, we test the end of the stack object
+		 * and not the buffer.
+		 */
+		zassert_true(check_perms(obj_start - 1, 1, 0),
+			     "user mode access to memory before start of stack object");
+		zassert_true(check_perms(obj_end, 1, 0),
+			     "user mode access past end of stack object");
+	}
+
+
+	/* This API is being removed just whine about it for now */
+	if (Z_THREAD_STACK_BUFFER(stack_obj) != stack_start) {
+		printk("WARNING: Z_THREAD_STACK_BUFFER() reports %p\n",
+		       Z_THREAD_STACK_BUFFER(stack_obj));
+	}
+
+	if (z_arch_is_user_context()) {
+		zassert_true(stack_size <= obj_size - K_THREAD_STACK_RESERVED,
+			      "bad stack size in thread struct");
+	}
+
+
+	k_sem_give(&uthread_end_sem);
+}
+
+void stest_thread_entry(void *p1, void *p2, void *p3)
+{
+	bool drop = (bool)p3;
+
+	if (drop) {
+		k_thread_user_mode_enter(stest_thread_entry, p1, p2,
+					 (void *)false);
+	} else {
+		stack_buffer_scenarios((k_thread_stack_t *)p1, (size_t)p2);
+	}
+}
+
+void stest_thread_launch(void *stack_obj, size_t obj_size, u32_t flags,
+			 bool drop)
+{
+	k_thread_create(&uthread_thread, stack_obj, STEST_STACKSIZE,
+			stest_thread_entry, stack_obj, (void *)obj_size,
+			(void *)drop,
+			-1, flags, K_NO_WAIT);
+	k_sem_take(&uthread_end_sem, K_FOREVER);
+
+	stack_analyze("test_thread", (char *)uthread_thread.stack_info.start,
+		      uthread_thread.stack_info.size);
+}
+
+void scenario_entry(void *stack_obj, size_t obj_size)
+{
+	printk("Stack object %p[%zu]\n", stack_obj, obj_size);
+	printk(" - Testing supervisor mode\n");
+	stest_thread_launch(stack_obj, obj_size, 0, false);
+	printk(" - Testing user mode (direct launch)\n");
+	stest_thread_launch(stack_obj, obj_size, K_USER | K_INHERIT_PERMS,
+			    false);
+	printk(" - Testing user mode (drop)\n");
+	stest_thread_launch(stack_obj, obj_size, K_INHERIT_PERMS,
+			    true);
+}
+
+void test_stack_buffer(void)
+{
+	printk("Reserved space: %u\n", K_THREAD_STACK_RESERVED);
+	printk("Provided stack size: %u\n", STEST_STACKSIZE);
+	scenario_entry(stest_stack, sizeof(stest_stack));
+
+	for (int i = 0; i < NUM_STACKS; i++) {
+		scenario_entry(stest_stack_array[i],
+			       sizeof(stest_stack_array[i]));
+	}
+
+	scenario_entry(&stest_member_stack.stack,
+		       sizeof(stest_member_stack.stack));
+
+}
 
 void test_main(void)
 {
@@ -688,7 +1095,7 @@ void test_main(void)
 	k_mem_domain_add_thread(&dom0, k_current_get());
 
 #if defined(CONFIG_ARM)
-	priv_stack_ptr = (int *)_k_priv_stack_find(ztest_thread_stack) -
+	priv_stack_ptr = (int *)z_priv_stack_find(ztest_thread_stack) -
 		MPU_GUARD_ALIGN_AND_SIZE;
 
 #endif
@@ -719,7 +1126,16 @@ void test_main(void)
 			 ztest_unit_test(user_mode_enter),
 			 ztest_user_unit_test(write_kobject_user_pipe),
 			 ztest_user_unit_test(read_kobject_user_pipe),
-			 ztest_unit_test(access_other_memdomain)
+			 ztest_unit_test(access_other_memdomain),
+			 ztest_unit_test(domain_add_thread_drop_to_user),
+			 ztest_unit_test(domain_add_part_drop_to_user),
+			 ztest_unit_test(domain_remove_part_drop_to_user),
+			 ztest_unit_test(domain_remove_thread_drop_to_user),
+			 ztest_unit_test(domain_add_thread_context_switch),
+			 ztest_unit_test(domain_add_part_context_switch),
+			 ztest_unit_test(domain_remove_part_context_switch),
+			 ztest_unit_test(domain_remove_thread_context_switch),
+			 ztest_unit_test(test_stack_buffer)
 			 );
 	ztest_run_test_suite(userspace);
 }

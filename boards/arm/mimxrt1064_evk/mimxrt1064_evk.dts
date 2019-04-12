@@ -6,7 +6,7 @@
 
 /dts-v1/;
 
-#include <nxp/nxp_rt.dtsi>
+#include <nxp/nxp_rt1064.dtsi>
 
 / {
 	model = "NXP MIMXRT1064-EVK board";
@@ -21,6 +21,7 @@
 		uart-1 = &uart1;
 		led0 = &green_led;
 		sw0 = &user_button;
+		eth = &eth;
 	};
 
 	chosen {
@@ -50,19 +51,34 @@
 			gpios = <&gpio5 0 GPIO_INT_ACTIVE_LOW>;
 		};
 	};
+
+	panel {
+		compatible = "rocktech,rk043fn02h-ct";
+		port {
+			lcd_panel_in: endpoint {
+				remote-endpoint = <&lcd_panel_out>;
+			};
+		};
+	};
 };
 
-&flexspi1 {
-	reg = <0x402a4000 0x4000>, <0x70000000 0x400000>;
-	/* WINBOND */
-	w25q32jvwj0: w25q32jvwj@0 {
-		compatible = "winbond,w25q32jvwj", "jedec,spi-nor";
-		reg = <0>;
-		status = "ok";
+&lcdif1 {
+	status = "ok";
+	port {
+		lcd_panel_out: endpoint {
+			remote-endpoint = <&lcd_panel_in>;
+		};
 	};
 };
 
 &uart1 {
 	status = "ok";
 	current-speed = <115200>;
+};
+
+&eth {
+	status = "ok";
+	ptp {
+		status = "ok";
+	};
 };

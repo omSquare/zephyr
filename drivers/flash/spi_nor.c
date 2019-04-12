@@ -27,7 +27,7 @@
 #define MASK_64K 0xFFFF
 
 #define SPI_NOR_MAX_ADDR_WIDTH 4
-#define SECTORS_COUNT ((DT_JEDEC_SPI_NOR_0_SIZE / 8192) \
+#define SECTORS_COUNT ((DT_JEDEC_SPI_NOR_0_SIZE / 8) \
 		       / CONFIG_SPI_NOR_SECTOR_SIZE)
 
 #define JEDEC_ID(x)		    \
@@ -355,7 +355,7 @@ static int spi_nor_configure(struct device *dev)
 		return -ENODEV;
 	}
 
-	data->cs_ctrl.gpio_pin = DT_JEDEC_SPI_NOR_0_HOLD_GPIOS_PIN;
+	data->cs_ctrl.gpio_pin = DT_JEDEC_SPI_NOR_0_CS_GPIO_PIN;
 	data->cs_ctrl.delay = CONFIG_SPI_NOR_CS_WAIT_DELAY;
 
 	data->spi_cfg.cs = &data->cs_ctrl;

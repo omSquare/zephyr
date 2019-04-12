@@ -164,14 +164,13 @@ struct connection {
 		} phy_upd_ind;
 #endif /* CONFIG_BT_CTLR_PHY */
 
+#if defined(CONFIG_BT_CTLR_LE_ENC)
 		struct {
 			u8_t  initiate;
 			u8_t  error_code;
-			u8_t  rand[8];
-			u8_t  ediv[2];
-			u8_t  ltk[16];
 			u8_t  skd[16];
 		} encryption;
+#endif /* CONFIG_BT_CTLR_LE_ENC */
 	} llcp;
 
 	u32_t llcp_features;
@@ -194,6 +193,16 @@ struct connection {
 			u8_t reason;
 		} radio_pdu_node_rx;
 	} llcp_terminate;
+
+#if defined(CONFIG_BT_CTLR_LE_ENC)
+	struct {
+		u8_t req;
+		u8_t ack;
+		u8_t ediv[2];
+		u8_t rand[8];
+		u8_t ltk[16];
+	} llcp_enc;
+#endif /* CONFIG_BT_CTLR_LE_ENC */
 
 #if defined(CONFIG_BT_CTLR_CONN_PARAM_REQ)
 	struct {
@@ -319,7 +328,7 @@ struct pdu_data_q_tx {
 
 #define LL_MEM_RX_POOL_SZ (MROUND(offsetof(struct radio_pdu_node_rx, \
 					   pdu_data) + \
-				  max((PDU_AC_SIZE_MAX + PDU_AC_SIZE_EXTRA), \
+				  MAX((PDU_AC_SIZE_MAX + PDU_AC_SIZE_EXTRA), \
 				      (offsetof(struct pdu_data, lldata) + \
 				       LL_LENGTH_OCTETS_RX_MAX))) * \
 			   (RADIO_PACKET_COUNT_RX_MAX + 3))

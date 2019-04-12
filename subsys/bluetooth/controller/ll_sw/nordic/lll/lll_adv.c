@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include <zephyr/types.h>
+#include <misc/byteorder.h>
 
 #include <toolchain.h>
 #include <bluetooth/hci.h>
@@ -116,7 +117,7 @@ static int init_reset(void)
 static int prepare_cb(struct lll_prepare_param *prepare_param)
 {
 	struct lll_adv *lll = prepare_param->param;
-	u32_t aa = 0x8e89bed6;
+	u32_t aa = sys_cpu_to_le32(0x8e89bed6);
 	u32_t ticks_at_event;
 	struct evt_hdr *evt;
 	u32_t remainder_us;
@@ -141,7 +142,7 @@ static int prepare_cb(struct lll_prepare_param *prepare_param)
 
 	radio_reset();
 	/* TODO: other Tx Power settings */
-	radio_tx_power_set(0);
+	radio_tx_power_set(RADIO_TXP_DEFAULT);
 
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 	/* TODO: if coded we use S8? */
@@ -407,7 +408,7 @@ static void isr_rx(void *param)
 		irkmatch_id = radio_ar_match_get();
 		rssi_ready = radio_rssi_is_ready();
 	} else {
-		crc_ok = devmatch_ok = irkmatch_ok = rssi_ready = 0;
+		crc_ok = devmatch_ok = irkmatch_ok = rssi_ready = 0U;
 		devmatch_id = irkmatch_id = 0xFF;
 	}
 
@@ -569,7 +570,7 @@ static void chan_prepare(struct lll_adv *lll)
 	struct pdu_adv *pdu;
 	struct pdu_adv *scan_pdu;
 	u8_t chan;
-	u8_t upd = 0;
+	u8_t upd = 0U;
 
 	pdu = lll_adv_data_latest_get(lll, &upd);
 	scan_pdu = lll_adv_scan_rsp_latest_get(lll, &upd);
@@ -744,7 +745,7 @@ static inline bool isr_rx_sr_check(struct lll_adv *lll, struct pdu_adv *adv,
 		 (devmatch_ok || ctrl_irk_whitelisted(*rl_idx)))) &&
 		isr_rx_sr_adva_check(adv, sr);
 #else
-	return (((lll->filter_policy & 0x01) == 0) || devmatch_ok) &&
+	return (((lll->filter_policy & 0x01) == 0U) || devmatch_ok) &&
 		isr_rx_sr_adva_check(adv, sr);
 #endif /* CONFIG_BT_CTLR_PRIVACY */
 }

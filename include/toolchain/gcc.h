@@ -105,15 +105,28 @@ do {                                                                    \
  * stringification
  */
 #define __GENERIC_SECTION(segment) __attribute__((section(STRINGIFY(segment))))
-#define _GENERIC_SECTION(segment) __GENERIC_SECTION(segment)
+#define Z_GENERIC_SECTION(segment) __GENERIC_SECTION(segment)
 
 #define ___in_section(a, b, c) \
-	__attribute__((section("." _STRINGIFY(a)			\
-				"." _STRINGIFY(b)			\
-				"." _STRINGIFY(c))))
+	__attribute__((section("." Z_STRINGIFY(a)			\
+				"." Z_STRINGIFY(b)			\
+				"." Z_STRINGIFY(c))))
 #define __in_section(a, b, c) ___in_section(a, b, c)
 
 #define __in_section_unique(seg) ___in_section(seg, __FILE__, __COUNTER__)
+
+/* When using XIP, using '__ramfunc' places a function into RAM instead
+ * of FLASH. Make sure '__ramfunc' is defined only when
+ * CONFIG_ARCH_HAS_RAMFUNC_SUPPORT is defined, so that the compiler can
+ * report an error if '__ramfunc' is used but the architecture does not
+ * support it.
+ */
+#if !defined(CONFIG_XIP)
+#define __ramfunc
+#elif defined(CONFIG_ARCH_HAS_RAMFUNC_SUPPORT)
+#define __ramfunc	__attribute__((noinline))			\
+			__attribute__((long_call, section(".ramfunc")))
+#endif /* !CONFIG_XIP */
 
 #ifndef __packed
 #define __packed        __attribute__((__packed__))
@@ -150,26 +163,9 @@ do {                                                                    \
 
 #ifdef CONFIG_ARM
 
-#if defined(CONFIG_ISA_THUMB)
-
-#define FUNC_CODE()				\
-	.code 16;				\
-	.thumb_func;
-
-#define FUNC_INSTR(a)				\
-	BX pc;					\
-	NOP;					\
-	.code 32;				\
-A##a:
-
-#elif defined(CONFIG_ISA_THUMB2)
+#if defined(CONFIG_ISA_THUMB2)
 
 #define FUNC_CODE() .thumb;
-#define FUNC_INSTR(a)
-
-#elif defined(CONFIG_ISA_ARM)
-
-#define FUNC_CODE() .code 32;
 #define FUNC_INSTR(a)
 
 #else
@@ -293,8 +289,6 @@ A##a:
 #if defined(CONFIG_ISA_THUMB2)
 /* '.syntax unified' is a gcc-ism used in thumb-2 asm files */
 #define _ASM_FILE_PROLOGUE .text; .syntax unified; .thumb
-#elif defined(CONFIG_ISA_THUMB)
-#define _ASM_FILE_PROLOGUE .text; .code 16
 #else
 #define _ASM_FILE_PROLOGUE .text; .code 32
 #endif

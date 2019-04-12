@@ -83,6 +83,7 @@ static u32_t def_val[4];
 static volatile u8_t status[4];
 static K_SEM_DEFINE(sem, 0, 1);	/* starts off "not available" */
 static struct gpio_callback callback[4];
+static enum usb_dc_status_code usb_status;
 
 #define MOUSE_BTN_REPORT_POS	0
 #define MOUSE_X_REPORT_POS	1
@@ -93,11 +94,24 @@ static struct gpio_callback callback[4];
 #define MOUSE_BTN_MIDDLE	BIT(2)
 
 
+
+static void status_cb(enum usb_dc_status_code status, const u8_t *param)
+{
+	usb_status = status;
+}
+
 static void left_button(struct device *gpio, struct gpio_callback *cb,
 			u32_t pins)
 {
 	u32_t cur_val;
 	u8_t state = status[MOUSE_BTN_REPORT_POS];
+
+	if (IS_ENABLED(CONFIG_USB_DEVICE_REMOTE_WAKEUP)) {
+		if (usb_status == USB_DC_SUSPEND) {
+			usb_wakeup_request();
+			return;
+		}
+	}
 
 	gpio_pin_read(gpio, PIN0, &cur_val);
 	if (def_val[0] != cur_val) {
@@ -118,6 +132,13 @@ static void right_button(struct device *gpio, struct gpio_callback *cb,
 {
 	u32_t cur_val;
 	u8_t state = status[MOUSE_BTN_REPORT_POS];
+
+	if (IS_ENABLED(CONFIG_USB_DEVICE_REMOTE_WAKEUP)) {
+		if (usb_status == USB_DC_SUSPEND) {
+			usb_wakeup_request();
+			return;
+		}
+	}
 
 	gpio_pin_read(gpio, PIN1, &cur_val);
 	if (def_val[0] != cur_val) {
@@ -142,7 +163,7 @@ static void x_move(struct device *gpio, struct gpio_callback *cb, u32_t pins)
 	gpio_pin_read(gpio, PIN2, &cur_val);
 
 	if (def_val[2] != cur_val) {
-		state += 10;
+		state += 10U;
 	}
 
 	if (status[MOUSE_X_REPORT_POS] != state) {
@@ -161,7 +182,7 @@ static void y_move(struct device *gpio, struct gpio_callback *cb, u32_t pins)
 	gpio_pin_read(gpio, PIN3, &cur_val);
 
 	if (def_val[3] != cur_val) {
-		state += 10;
+		state += 10U;
 	}
 
 	if (status[MOUSE_Y_REPORT_POS] != state) {
@@ -193,7 +214,7 @@ int callbacks_configure(struct device *gpio, u32_t pin, int flags,
 void main(void)
 {
 	u8_t report[4] = { 0x00 };
-	u8_t toggle = 0;
+	u8_t toggle = 0U;
 	struct device *led_dev, *hid_dev;
 
 	led_dev = device_get_binding(LED_PORT);
@@ -240,8 +261,12 @@ void main(void)
 	}
 #endif
 
-	usb_hid_register_device(hid_dev, hid_report_desc,
-				sizeof(hid_report_desc), NULL);
+	static const struct hid_ops ops = {
+			.status_cb = status_cb
+	};
+	usb_hid_register_device(hid_dev,
+				hid_report_desc, sizeof(hid_report_desc),
+				&ops);
 	usb_hid_init(hid_dev);
 
 	while (true) {
@@ -249,9 +274,9 @@ void main(void)
 
 		report[MOUSE_BTN_REPORT_POS] = status[MOUSE_BTN_REPORT_POS];
 		report[MOUSE_X_REPORT_POS] = status[MOUSE_X_REPORT_POS];
-		status[MOUSE_X_REPORT_POS] = 0;
+		status[MOUSE_X_REPORT_POS] = 0U;
 		report[MOUSE_Y_REPORT_POS] = status[MOUSE_Y_REPORT_POS];
-		status[MOUSE_Y_REPORT_POS] = 0;
+		status[MOUSE_Y_REPORT_POS] = 0U;
 		hid_int_ep_write(hid_dev, report, sizeof(report), NULL);
 
 		/* Toggle LED on sent report */

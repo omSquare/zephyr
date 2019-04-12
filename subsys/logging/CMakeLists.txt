@@ -1,5 +1,4 @@
-zephyr_sources_ifdef(CONFIG_SYS_LOG sys_log.c)
-zephyr_sources_ifdef(CONFIG_SYS_LOG_BACKEND_NET sys_log_net.c)
+# SPDX-License-Identifier: Apache-2.0
 
 zephyr_sources_ifdef(
   CONFIG_LOG
@@ -22,6 +21,11 @@ zephyr_sources_ifdef(
 zephyr_sources_ifdef(
   CONFIG_LOG_BACKEND_NATIVE_POSIX
   log_backend_native_posix.c
+  )
+
+zephyr_sources_ifdef(
+  CONFIG_LOG_BACKEND_XTENSA_SIM
+  log_backend_xtensa_sim.c
   )
 
 zephyr_sources_ifdef(

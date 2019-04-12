@@ -209,12 +209,12 @@ static int hid_on_set_idle(struct hid_device_info *dev_data,
 
 	dev_data->idle_rate[report_id] = rate;
 
-	if (rate == 0) {
+	if (rate == 0U) {
 		/* Clear idle */
 		bool clear = true;
 
 		for (u16_t i = 1; i <= CONFIG_USB_HID_REPORTS; i++) {
-			if (dev_data->idle_rate[i] != 0) {
+			if (dev_data->idle_rate[i] != 0U) {
 				/* Report with non-zero id has idle rate. */
 				clear = false;
 				break;
@@ -224,7 +224,7 @@ static int hid_on_set_idle(struct hid_device_info *dev_data,
 			dev_data->idle_id_report = false;
 			LOG_DBG("Non-zero report idle rate OFF.");
 
-			if (dev_data->idle_rate[0] == 0) {
+			if (dev_data->idle_rate[0] == 0U) {
 				dev_data->idle_on = false;
 				LOG_DBG("Idle rate OFF.");
 			}
@@ -233,7 +233,7 @@ static int hid_on_set_idle(struct hid_device_info *dev_data,
 		/* Set idle */
 		dev_data->idle_on = true;
 		LOG_DBG("Idle rate ON.");
-		if (report_id != 0) {
+		if (report_id != 0U) {
 			/* Report with non-zero id has idle rate set now. */
 			dev_data->idle_id_report = true;
 			LOG_DBG("Non-zero report idle rate ON.");
@@ -302,8 +302,8 @@ void hid_clear_idle_ctx(struct hid_device_info *dev_data)
 	dev_data->idle_on = false;
 	dev_data->idle_id_report = false;
 	for (u16_t i = 0; i <= CONFIG_USB_HID_REPORTS; i++) {
-		dev_data->sof_cnt[i] = 0;
-		dev_data->idle_rate[i] = 0;
+		dev_data->sof_cnt[i] = 0U;
+		dev_data->idle_rate[i] = 0U;
 	}
 }
 
@@ -314,11 +314,11 @@ void hid_sof_handler(struct hid_device_info *dev_data)
 			dev_data->sof_cnt[i]++;
 		}
 
-		u32_t diff = abs((dev_data->idle_rate[i] * 4)
+		u32_t diff = abs((dev_data->idle_rate[i] * 4U)
 				 - dev_data->sof_cnt[i]);
 
-		if (diff < (2 + (dev_data->idle_rate[i] / 10))) {
-			dev_data->sof_cnt[i] = 0;
+		if (diff < (2 + (dev_data->idle_rate[i] / 10U))) {
+			dev_data->sof_cnt[i] = 0U;
 			if (dev_data->ops && dev_data->ops->on_idle) {
 				dev_data->ops->on_idle(i);
 			}
@@ -384,10 +384,9 @@ static void hid_do_status_cb(struct hid_device_info *dev_data,
 	}
 }
 
-#ifdef CONFIG_USB_COMPOSITE_DEVICE
-static void hid_status_composite_cb(struct usb_cfg_data *cfg,
-				    enum usb_dc_status_code status,
-				    const u8_t *param)
+static void hid_status_cb(struct usb_cfg_data *cfg,
+			  enum usb_dc_status_code status,
+			  const u8_t *param)
 {
 	struct hid_device_info *dev_data;
 	struct usb_dev_data *common;
@@ -404,25 +403,6 @@ static void hid_status_composite_cb(struct usb_cfg_data *cfg,
 
 	hid_do_status_cb(dev_data, status, param);
 }
-#else
-static void hid_status_cb(enum usb_dc_status_code status, const u8_t *param)
-{
-	struct hid_device_info *dev_data;
-	struct usb_dev_data *common;
-
-	/* Should be the only one element in the list */
-	common = CONTAINER_OF(sys_slist_peek_head(&usb_hid_devlist),
-			      struct usb_dev_data, node);
-	if (common == NULL) {
-		LOG_WRN("Device data not found");
-		return;
-	}
-
-	dev_data = CONTAINER_OF(common, struct hid_device_info, common);
-
-	hid_do_status_cb(dev_data, status, param);
-}
-#endif
 
 static int hid_class_handle_req(struct usb_setup_packet *setup,
 				s32_t *len, u8_t **data)
@@ -547,7 +527,7 @@ static int hid_custom_handle_req(struct usb_setup_packet *setup,
 
 			LOG_DBG("Return HID Descriptor");
 
-			*len = min(*len, hid_desc->if0_hid.bLength);
+			*len = MIN(*len, hid_desc->if0_hid.bLength);
 			*data = (u8_t *)&hid_desc->if0_hid;
 			break;
 		case HID_CLASS_DESCRIPTOR_REPORT:
@@ -560,7 +540,7 @@ static int hid_custom_handle_req(struct usb_setup_packet *setup,
 			if (*len != dev_data->report_size) {
 				LOG_WRN("len %d doesn't match "
 					"Report Descriptor size", *len);
-				*len = min(*len, dev_data->report_size);
+				*len = MIN(*len, dev_data->report_size);
 			}
 			*data = (u8_t *)dev_data->report_desc;
 			break;
@@ -653,23 +633,6 @@ static void hid_interface_config(struct usb_desc_header *head,
 #endif
 }
 
-#ifdef CONFIG_USB_COMPOSITE_DEVICE
-#define DEFINE_HID_CFG_DATA(x)						\
-	USBD_CFG_DATA_DEFINE(hid)					\
-	struct usb_cfg_data hid_config_##x = {				\
-		.usb_device_description = NULL,				\
-		.interface_config = hid_interface_config,		\
-		.interface_descriptor = &hid_cfg_##x.if0,		\
-		.cb_usb_status_composite = hid_status_composite_cb,	\
-		.interface = {						\
-			.class_handler = hid_class_handle_req,		\
-			.custom_handler = hid_custom_handle_req,	\
-			.payload_data = NULL,				\
-		},							\
-		.num_endpoints = ARRAY_SIZE(hid_ep_data_##x),		\
-		.endpoint = hid_ep_data_##x,				\
-	}
-#else
 #define DEFINE_HID_CFG_DATA(x)						\
 	USBD_CFG_DATA_DEFINE(hid)					\
 	struct usb_cfg_data hid_config_##x = {				\
@@ -684,8 +647,7 @@ static void hid_interface_config(struct usb_desc_header *head,
 		},							\
 		.num_endpoints = ARRAY_SIZE(hid_ep_data_##x),		\
 		.endpoint = hid_ep_data_##x,				\
-	}
-#endif
+	};
 
 #if !defined(CONFIG_USB_COMPOSITE_DEVICE)
 static u8_t interface_data[CONFIG_USB_HID_MAX_PAYLOAD_SIZE];

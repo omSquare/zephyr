@@ -134,7 +134,7 @@ Create an application package, using nrfutil::
 
 Flash it onto the board::
 
-	nrfutil dfu usb_serial -pkg pkg.zip -p /dev/ttyACM0
+	nrfutil dfu usb-serial -pkg pkg.zip -p /dev/ttyACM0
 
 Observe the green LED on the board blinking.
 
@@ -148,8 +148,8 @@ It is possible to use the nRF5 bootloader alongside MCUBoot. To do so,
 program the board with MCUBoot as a Zephyr application, following
 the steps above. Then, prepare to compile an application with MCUBoot support.
 
-Select :option: `CONFIG_BOOTLOADER_MCUBOOT`, under "Boot options" and set
-:option: `CONFIG_TEXT_SECTION_OFFSET` under "Build and Link features",
+Select :option:`CONFIG_BOOTLOADER_MCUBOOT`, under "Boot options" and set
+:option:`CONFIG_TEXT_SECTION_OFFSET` under "Build and Link features",
 "Linker options" to 0x200 to ensure the code is offset to account for MCUboot
 firmware image metadata.
 

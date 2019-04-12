@@ -20,7 +20,7 @@
 	GTEXT(__start)
 
 	/* externs */
-	GTEXT(_Cstart)
+	GTEXT(z_cstart)
 
 	GDATA(_idt_base_address)
 	GDATA(_interrupt_stack)
@@ -39,7 +39,7 @@
 #endif
 
 #ifdef CONFIG_SYS_POWER_DEEP_SLEEP_STATES
-	GTEXT(sys_resume_from_deep_sleep)
+	GTEXT(_sys_resume_from_deep_sleep)
 #endif
 
 #ifdef CONFIG_REALMODE
@@ -247,7 +247,7 @@ __csSet:
 	/*
 	 * Set the stack pointer to the area used for the interrupt stack.
 	 * Note this stack is used during the execution of __start() and
-	 * _Cstart() until the multi-tasking kernel is initialized.  The
+	 * z_cstart() until the multi-tasking kernel is initialized.  The
 	 * dual-purposing of this area of memory is safe since
 	 * interrupts are disabled until the first context switch.
 	 *
@@ -255,13 +255,13 @@ __csSet:
 	 * the ISR stack size are some multiple of STACK_ALIGN, which
 	 * is at least 4.
 	 *
-	 * This is also used to call the sys_resume_from_deep_sleep()
+	 * This is also used to call the _sys_resume_from_deep_sleep()
 	 * routine to avoid memory corruption if the system is resuming from
-	 * deep sleep. It is important that sys_resume_from_deep_sleep()
+	 * deep sleep. It is important that _sys_resume_from_deep_sleep()
 	 * restores the stack pointer to what it was at deep sleep before
          * enabling interrupts.  This is necessary to avoid
 	 * interfering with interrupt handler use of this stack.
-	 * If it is a cold boot then sys_resume_from_deep_sleep() should
+	 * If it is a cold boot then _sys_resume_from_deep_sleep() should
 	 * not do anything and must return immediately.
 	 */
 #ifdef CONFIG_INIT_STACKS
@@ -287,7 +287,7 @@ __csSet:
 #if defined(CONFIG_SYS_POWER_DEEP_SLEEP_STATES) && \
              !defined(CONFIG_BOOTLOADER_CONTEXT_RESTORE)
 	/*
-	 * Invoke sys_resume_from_deep_sleep() hook to handle resume from
+	 * Invoke _sys_resume_from_deep_sleep() hook to handle resume from
 	 * deep sleep. It should first check whether system is recovering from
 	 * deep sleep state. If it is, then this function should restore
 	 * states and resume at the point system went to deep sleep.
@@ -298,7 +298,7 @@ __csSet:
 	 * return and execution falls through to cold boot path.
 	 */
 
-	call sys_resume_from_deep_sleep
+	call _sys_resume_from_deep_sleep
 
 #endif
 
@@ -314,13 +314,13 @@ __csSet:
 
 	call	_x86_data_copy
 
-#ifdef CONFIG_APP_SHARED_MEM
+#ifdef CONFIG_USERSPACE
 	movl	$_app_smem_start, %edi /* DATA in RAM (dest) */
 	movl	$_app_smem_rom_start, %esi /* DATA in ROM (src) */
 	movl	$_app_smem_num_words, %ecx /* Size of DATA in quad bytes */
 
 	call	_x86_data_copy
-#endif /* CONFIG_APP_SHARED_MEM */
+#endif /* CONFIG_USERSPACE */
 
 #endif /* CONFIG_XIP */
 
@@ -348,7 +348,7 @@ __csSet:
 #ifdef CONFIG_X86_MMU
 
 	/* load the page directory address into the registers*/
-	movl $__mmu_tables_start, %eax
+	movl $z_x86_kernel_pdpt, %eax
 	movl %eax, %cr3
 
 	/* Enable PAE */
@@ -377,7 +377,7 @@ __csSet:
 
 	/* Jump to C portion of kernel initialization and never return */
 
-	jmp	_Cstart
+	jmp	z_cstart
 
 
 _x86_bss_zero:

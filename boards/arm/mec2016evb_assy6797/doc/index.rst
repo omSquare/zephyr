@@ -1,6 +1,6 @@
 .. _mec2016evb_assy6797:
 
-MEC2616EVB ASSY6797
+MEC2016EVB ASSY6797
 ###################
 
 Overview
@@ -62,8 +62,7 @@ features:
 Other hardware features are not currently supported by Zephyr (at the moment)
 
 The default configuration can be found in the Kconfig file:
-
-        ``boards/arm/mec2016evb_assy6797/mec2016evb_assy6797_defconfig``
+``boards/arm/mec2016evb_assy6797/mec2016evb_assy6797_defconfig``
 
 
 Connections and IOs
@@ -74,7 +73,7 @@ Microchip to provide the schematic for this board.
 System Clock
 ============
 
-The MEC1701 MCU is configured to use the 48Mhz internal oscilator with the
+The MEC1701 MCU is configured to use the 48Mhz internal oscillator with the
 on-chip PLL to generate a resulting EC clock rate of 12 MHz. See Processor clock
 control register (chapter 4 in user manual)
 
@@ -87,7 +86,7 @@ Jumper settings
 ***************
 
 Please follow the jumper settings below to properly demo this
-board. Advanced users may deviate from this recomendation.
+board. Advanced users may deviate from this recommendation.
 
 Jump setting for MEC2016 EVB Assy 6797 Rev A1p0
 ===============================================
@@ -151,7 +150,7 @@ Programming and Debugging
 *************************
 
 This board comes with a Cortex ETM port which facilitates tracing and debugging
-using a single physical conection.  In attidion, it comes with sockets for
+using a single physical connection.  In addition, it comes with sockets for
 JTAG only sessions.
 
 Flashing
@@ -178,7 +177,7 @@ Flashing
    - Stop bits: 1
 
 #. Connect the MEC2016EVB_ASSY_6797 board to your host computer using the
-   UART0 port. Then build :ref: `hello_world` application. It is important
+   UART0 port. Then build :ref:`hello_world` application. It is important
    to generate a binary with a new load address, for example do the following::
 
         ${OBJCOPY} --change-addresses -0xb0000 -O binary -S ${in_elf} ${out_bin}

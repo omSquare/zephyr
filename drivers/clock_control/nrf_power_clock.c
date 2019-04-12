@@ -21,7 +21,7 @@ static u8_t m16src_ref;
 static u8_t m16src_grd;
 static u8_t k32src_initialized;
 
-static int _m16src_start(struct device *dev, clock_control_subsys_t sub_system)
+static int m16src_start(struct device *dev, clock_control_subsys_t sub_system)
 {
 	bool blocking;
 	u32_t imask;
@@ -103,7 +103,7 @@ hf_already_started:
 	}
 }
 
-static int _m16src_stop(struct device *dev, clock_control_subsys_t sub_system)
+static int m16src_stop(struct device *dev, clock_control_subsys_t sub_system)
 {
 	u32_t imask;
 
@@ -144,7 +144,7 @@ static int _m16src_stop(struct device *dev, clock_control_subsys_t sub_system)
 	return 0;
 }
 
-static int _k32src_start(struct device *dev, clock_control_subsys_t sub_system)
+static int k32src_start(struct device *dev, clock_control_subsys_t sub_system)
 {
 	u32_t lf_clk_src;
 	u32_t imask;
@@ -248,7 +248,7 @@ static int _k32src_start(struct device *dev, clock_control_subsys_t sub_system)
 		 */
 		nrf_clock_int_enable(NRF_CLOCK_INT_HF_STARTED_MASK);
 
-		err = _m16src_start(dev, false);
+		err = m16src_start(dev, false);
 		if (!err) {
 			NVIC_SetPendingIRQ(DT_NORDIC_NRF_CLOCK_0_IRQ_0);
 		} else {
@@ -276,7 +276,15 @@ static inline void power_event_cb(nrf_power_event_t event)
 }
 #endif
 
-static void _power_clock_isr(void *arg)
+/* Note: this function has public linkage, and MUST have this
+ * particular name.  The platform architecture itself doesn't care,
+ * but there is a test (tests/kernel/arm_irq_vector_table) that needs
+ * to find it to it can set it in a custom vector table.  Should
+ * probably better abstract that at some point (e.g. query and reset
+ * it by pointer at runtime, maybe?) so we don't have this leaky
+ * symbol.
+ */
+void nrf_power_clock_isr(void *arg)
 {
 	u8_t pof, hf_intenset, hf, lf_intenset, lf;
 #if NRF_CLOCK_HAS_CALIBRATION
@@ -382,7 +390,7 @@ static void _power_clock_isr(void *arg)
 		NRF_CLOCK->EVENTS_DONE = 0;
 
 		/* Calibration done, stop 16M Xtal. */
-		err = _m16src_stop(dev, NULL);
+		err = m16src_stop(dev, NULL);
 		__ASSERT_NO_MSG(!err || err == -EBUSY);
 
 		/* Start timer for next calibration. */
@@ -400,7 +408,7 @@ static void _power_clock_isr(void *arg)
 		 */
 		NRF_CLOCK->INTENSET = CLOCK_INTENSET_HFCLKSTARTED_Msk;
 
-		err = _m16src_start(dev, false);
+		err = m16src_start(dev, false);
 		if (!err) {
 			NVIC_SetPendingIRQ(DT_NORDIC_NRF_CLOCK_0_IRQ_0);
 		} else {
@@ -427,7 +435,7 @@ static void _power_clock_isr(void *arg)
 #endif
 }
 
-static int _clock_control_init(struct device *dev)
+static int clock_control_init(struct device *dev)
 {
 	/* TODO: Initialization will be called twice, once for 32KHz and then
 	 * for 16 MHz clock. The vector is also shared for other power related
@@ -436,8 +444,8 @@ static int _clock_control_init(struct device *dev)
 	 * NOTE: Currently the operations here are idempotent.
 	 */
 	IRQ_CONNECT(DT_NORDIC_NRF_CLOCK_0_IRQ_0,
-		    CONFIG_CLOCK_CONTROL_NRF_IRQ_PRIORITY,
-		    _power_clock_isr, 0, 0);
+		    DT_NORDIC_NRF_CLOCK_0_IRQ_0_PRIORITY,
+		    nrf_power_clock_isr, 0, 0);
 
 	irq_enable(DT_NORDIC_NRF_CLOCK_0_IRQ_0);
 
@@ -445,26 +453,26 @@ static int _clock_control_init(struct device *dev)
 }
 
 static const struct clock_control_driver_api _m16src_clock_control_api = {
-	.on = _m16src_start,
-	.off = _m16src_stop,
+	.on = m16src_start,
+	.off = m16src_stop,
 	.get_rate = NULL,
 };
 
 DEVICE_AND_API_INIT(clock_nrf5_m16src,
-		    CONFIG_CLOCK_CONTROL_NRF_M16SRC_DRV_NAME,
-		    _clock_control_init, NULL, NULL, PRE_KERNEL_1,
+		    DT_NORDIC_NRF_CLOCK_0_LABEL "_16M",
+		    clock_control_init, NULL, NULL, PRE_KERNEL_1,
 		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &_m16src_clock_control_api);
 
 static const struct clock_control_driver_api _k32src_clock_control_api = {
-	.on = _k32src_start,
+	.on = k32src_start,
 	.off = NULL,
 	.get_rate = NULL,
 };
 
 DEVICE_AND_API_INIT(clock_nrf5_k32src,
-		    CONFIG_CLOCK_CONTROL_NRF_K32SRC_DRV_NAME,
-		    _clock_control_init, NULL, NULL, PRE_KERNEL_1,
+		    DT_NORDIC_NRF_CLOCK_0_LABEL "_32K",
+		    clock_control_init, NULL, NULL, PRE_KERNEL_1,
 		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &_k32src_clock_control_api);
 

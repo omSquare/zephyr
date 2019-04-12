@@ -26,13 +26,6 @@ LOG_MODULE_DECLARE(net_google_iot_mqtt, LOG_LEVEL_DBG);
 
 #include <mbedtls/debug.h>
 
-#ifdef CONFIG_STDOUT_CONSOLE
-# include <stdio.h>
-# define PRINT printf
-#else
-# define PRINT printk
-#endif
-
 extern s64_t time_base;
 
 /* private key information */
@@ -179,7 +172,7 @@ void mqtt_evt_handler(struct mqtt_client *const client,
 		}
 
 		/* increment message id for when we send next message */
-		pub_data.message_id += 1;
+		pub_data.message_id += 1U;
 		LOG_INF("PUBACK packet id: %u",
 				evt->param.puback.message_id);
 		break;
@@ -208,7 +201,7 @@ static int wait_for_input(int timeout)
 	return res;
 }
 
-#define ALIVE_TIME	(60 * MSEC_PER_SEC)
+#define ALIVE_TIME	(MSEC_PER_SEC * 60U)
 
 static struct mqtt_utf8 password = {
 	.utf8 = token
@@ -357,8 +350,8 @@ void mqtt_startup(char *hostname, int port)
 	subs_topic.topic.utf8 = subs_topic_str;
 	subs_topic.topic.size = strlen(subs_topic_str);
 	subs_list.list = &subs_topic;
-	subs_list.list_count = 1;
-	subs_list.message_id = 1;
+	subs_list.list_count = 1U;
+	subs_list.message_id = 1U;
 
 	err = mqtt_subscribe(client, &subs_list);
 	if (err) {
@@ -371,9 +364,9 @@ void mqtt_startup(char *hostname, int port)
 	pub_data.message.topic.topic.size = strlen(pub_topic);
 	pub_data.message.topic.qos = MQTT_QOS_1_AT_LEAST_ONCE;
 	pub_data.message.payload.data = (u8_t *)pub_msg;
-	pub_data.message_id = 1;
-	pub_data.dup_flag = 0;
-	pub_data.retain_flag = 1;
+	pub_data.message_id = 1U;
+	pub_data.dup_flag = 0U;
+	pub_data.retain_flag = 1U;
 
 	mqtt_live(client);
 

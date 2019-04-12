@@ -22,7 +22,7 @@ LOG_MODULE_REGISTER(mpu);
  * available MPU regions for dynamic programming depends on the number of the
  * static MPU regions currently being programmed, and the total number of HW-
  * available MPU regions. This macro is only used internally in function
- * _arch_configure_dynamic_mpu_regions(), to reserve sufficient area for the
+ * z_arch_configure_dynamic_mpu_regions(), to reserve sufficient area for the
  * array of dynamic regions passed to the underlying driver.
  */
 #if defined(CONFIG_USERSPACE)
@@ -37,11 +37,11 @@ LOG_MODULE_REGISTER(mpu);
 /* Convenience macros to denote the start address and the size of the system
  * memory area, where dynamic memory regions may be programmed at run-time.
  */
-#if defined(CONFIG_APP_SHARED_MEM)
+#if defined(CONFIG_USERSPACE)
 #define _MPU_DYNAMIC_REGIONS_AREA_START ((u32_t)&_app_smem_start)
 #else
 #define _MPU_DYNAMIC_REGIONS_AREA_START ((u32_t)&__kernel_ram_start)
-#endif /* CONFIG_APP_SHARED_MEM */
+#endif /* CONFIG_USERSPACE */
 #define _MPU_DYNAMIC_REGIONS_AREA_SIZE ((u32_t)&__kernel_ram_end - \
 		_MPU_DYNAMIC_REGIONS_AREA_START)
 
@@ -58,27 +58,47 @@ LOG_MODULE_REGISTER(mpu);
  * For some MPU architectures, such as the unmodified ARMv8-M MPU,
  * the function must execute with MPU enabled.
  */
-void _arch_configure_static_mpu_regions(void)
+void z_arch_configure_static_mpu_regions(void)
 {
-	/* Define a constant array of k_mem_partition objects
-	 * to hold the configuration of the respective static
-	 * MPU regions.
-	 */
-	const struct k_mem_partition static_regions[] = {
 #if defined(CONFIG_COVERAGE_GCOV) && defined(CONFIG_USERSPACE)
+		const struct k_mem_partition gcov_region =
 		{
 		.start = (u32_t)&__gcov_bss_start,
-		.size = (u32_t)&__gcov_bss_size
+		.size = (u32_t)&__gcov_bss_size,
 		.attr = K_MEM_PARTITION_P_RW_U_RW,
-		},
+		};
 #endif /* CONFIG_COVERAGE_GCOV && CONFIG_USERSPACE */
 #if defined(CONFIG_NOCACHE_MEMORY)
+		const struct k_mem_partition nocache_region =
 		{
 		.start = (u32_t)&_nocache_ram_start,
 		.size = (u32_t)&_nocache_ram_size,
 		.attr = K_MEM_PARTITION_P_RW_U_NA_NOCACHE,
-		}
+		};
 #endif /* CONFIG_NOCACHE_MEMORY */
+#if defined(CONFIG_ARCH_HAS_RAMFUNC_SUPPORT)
+		const struct k_mem_partition ramfunc_region =
+		{
+		.start = (u32_t)&_ramfunc_ram_start,
+		.size = (u32_t)&_ramfunc_ram_size,
+		.attr = K_MEM_PARTITION_P_RX_U_RX,
+		};
+#endif /* CONFIG_ARCH_HAS_RAMFUNC_SUPPORT */
+
+	/* Define a constant array of k_mem_partition objects
+	 * to hold the configuration of the respective static
+	 * MPU regions.
+	 */
+	const struct k_mem_partition *static_regions[] = {
+#if defined(CONFIG_COVERAGE_GCOV) && defined(CONFIG_USERSPACE)
+		&gcov_region,
+#endif /* CONFIG_COVERAGE_GCOV && CONFIG_USERSPACE */
+#if defined(CONFIG_NOCACHE_MEMORY)
+		&nocache_region,
+#endif /* CONFIG_NOCACHE_MEMORY */
+#if defined(CONFIG_ARCH_HAS_RAMFUNC_SUPPORT)
+		&ramfunc_region
+#endif /* CONFIG_ARCH_HAS_RAMFUNC_SUPPORT */
 	};
 
 	/* Configure the static MPU regions within firmware SRAM boundaries.
@@ -103,6 +123,7 @@ void _arch_configure_static_mpu_regions(void)
 		.size =  _MPU_DYNAMIC_REGIONS_AREA_SIZE,
 		}
 	};
+
 	arm_core_mpu_mark_areas_for_dynamic_regions(dyn_region_areas,
 		ARRAY_SIZE(dyn_region_areas));
 #endif /* CONFIG_MPU_REQUIRES_NON_OVERLAPPING_REGIONS */
@@ -120,18 +141,20 @@ void _arch_configure_static_mpu_regions(void)
  * For some MPU architectures, such as the unmodified ARMv8-M MPU,
  * the function must execute with MPU enabled.
  */
-void _arch_configure_dynamic_mpu_regions(struct k_thread *thread)
+void z_arch_configure_dynamic_mpu_regions(struct k_thread *thread)
 {
 	/* Define an array of k_mem_partition objects to hold the configuration
 	 * of the respective dynamic MPU regions to be programmed for
 	 * the given thread. The array of partitions (along with its
 	 * actual size) will be supplied to the underlying MPU driver.
 	 */
-	struct k_mem_partition dynamic_regions[_MAX_DYNAMIC_MPU_REGIONS_NUM];
+	struct k_mem_partition *dynamic_regions[_MAX_DYNAMIC_MPU_REGIONS_NUM];
 
-	u8_t region_num = 0;
+	u8_t region_num = 0U;
 
 #if defined(CONFIG_USERSPACE)
+	struct k_mem_partition thread_stack;
+
 	/* Memory domain */
 	LOG_DBG("configure thread %p's domain", thread);
 	struct k_mem_domain *mem_domain = thread->mem_domain_info.mem_domain;
@@ -156,11 +179,12 @@ void _arch_configure_dynamic_mpu_regions(struct k_thread *thread)
 				partition.start, partition.size);
 			__ASSERT(region_num < _MAX_DYNAMIC_MPU_REGIONS_NUM,
 				"Out-of-bounds error for dynamic region map.");
-			dynamic_regions[region_num] = partition;
+			dynamic_regions[region_num] =
+				&mem_domain->partitions[i];
 
 			region_num++;
 			num_partitions--;
-			if (num_partitions == 0) {
+			if (num_partitions == 0U) {
 				break;
 			}
 		}
@@ -169,47 +193,56 @@ void _arch_configure_dynamic_mpu_regions(struct k_thread *thread)
 	LOG_DBG("configure user thread %p's context", thread);
 	if (thread->arch.priv_stack_start) {
 		u32_t base = (u32_t)thread->stack_obj;
-		u32_t size = thread->stack_info.size;
-#if !defined(CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT)
-		/* In user-mode the thread stack will include the (optional)
-		 * guard area. For MPUs with arbitrary base address and limit
-		 * it is essential to include this size increase, to avoid
-		 * MPU faults.
-		 */
-		size += thread->stack_info.start - base;
-#endif
+		u32_t size = thread->stack_info.size +
+			(thread->stack_info.start - base);
+
 		__ASSERT(region_num < _MAX_DYNAMIC_MPU_REGIONS_NUM,
 			"Out-of-bounds error for dynamic region map.");
-		dynamic_regions[region_num] = (const struct k_mem_partition)
+		thread_stack = (const struct k_mem_partition)
 			{base, size, K_MEM_PARTITION_P_RW_U_RW};
+
+		dynamic_regions[region_num] = &thread_stack;
 
 		region_num++;
 	}
 #endif /* CONFIG_USERSPACE */
 
 #if defined(CONFIG_MPU_STACK_GUARD)
+	struct k_mem_partition guard;
+
 	/* Privileged stack guard */
+	u32_t guard_start;
 #if defined(CONFIG_USERSPACE)
-	u32_t guard_start = thread->arch.priv_stack_start ?
-	    (u32_t)thread->arch.priv_stack_start :
-	    (u32_t)thread->stack_obj;
+	if (thread->arch.priv_stack_start) {
+		guard_start = thread->arch.priv_stack_start;
+	} else {
+		guard_start = thread->stack_info.start -
+			MPU_GUARD_ALIGN_AND_SIZE;
+		__ASSERT((u32_t)thread->stack_obj == guard_start,
+		"Guard start (0x%x) not beginning at stack object (0x%x)\n",
+		guard_start, (u32_t)thread->stack_obj);
+	}
 #else
-	u32_t guard_start = thread->stack_info.start;
-#endif
+	guard_start = thread->stack_info.start -
+		MPU_GUARD_ALIGN_AND_SIZE;
+#endif /* CONFIG_USERSPACE */
+
 	__ASSERT(region_num < _MAX_DYNAMIC_MPU_REGIONS_NUM,
 		"Out-of-bounds error for dynamic region map.");
-	dynamic_regions[region_num] = (const struct k_mem_partition)
+	guard = (const struct k_mem_partition)
 	{
 		guard_start,
 		MPU_GUARD_ALIGN_AND_SIZE,
 		K_MEM_PARTITION_P_RO_U_NA
 	};
+	dynamic_regions[region_num] = &guard;
 
 	region_num++;
 #endif /* CONFIG_MPU_STACK_GUARD */
 
 	/* Configure the dynamic MPU regions */
-	arm_core_mpu_configure_dynamic_mpu_regions(dynamic_regions,
+	arm_core_mpu_configure_dynamic_mpu_regions(
+		(const struct k_mem_partition **)dynamic_regions,
 		region_num);
 }
 
@@ -220,7 +253,7 @@ void _arch_configure_dynamic_mpu_regions(struct k_thread *thread)
  *        that is supported by the MPU hardware, and with respect
  *        to the current static memory region configuration.
  */
-int _arch_mem_domain_max_partitions_get(void)
+int z_arch_mem_domain_max_partitions_get(void)
 {
 	int available_regions = arm_core_mpu_get_max_available_dyn_regions();
 
@@ -238,13 +271,13 @@ int _arch_mem_domain_max_partitions_get(void)
 /**
  * @brief Configure the memory domain of the thread.
  */
-void _arch_mem_domain_configure(struct k_thread *thread)
+void z_arch_mem_domain_configure(struct k_thread *thread)
 {
 	/* Request to configure memory domain for a thread.
 	 * This triggers re-programming of the entire dynamic
 	 * memory map.
 	 */
-	_arch_configure_dynamic_mpu_regions(thread);
+	z_arch_configure_dynamic_mpu_regions(thread);
 }
 
 /*
@@ -253,7 +286,7 @@ void _arch_mem_domain_configure(struct k_thread *thread)
  *
  * @param domain pointer to the memory domain (must be valid)
  */
-void _arch_mem_domain_destroy(struct k_mem_domain *domain)
+void z_arch_mem_domain_destroy(struct k_mem_domain *domain)
 {
 	/* This function will reset the access permission configuration
 	 * of the active partitions of the memory domain.
@@ -267,7 +300,7 @@ void _arch_mem_domain_destroy(struct k_mem_domain *domain)
 
 	for (i = 0; i < CONFIG_MAX_DOMAIN_PARTITIONS; i++) {
 		partition = domain->partitions[i];
-		if (partition.size == 0) {
+		if (partition.size == 0U) {
 			/* Zero size indicates a non-existing
 			 * memory partition.
 			 */
@@ -285,7 +318,7 @@ void _arch_mem_domain_destroy(struct k_mem_domain *domain)
  * @param partition_id the ID (sequence) number of the memory domain
  *        partition (must be a valid partition).
  */
-void _arch_mem_domain_partition_remove(struct k_mem_domain *domain,
+void z_arch_mem_domain_partition_remove(struct k_mem_domain *domain,
 				       u32_t  partition_id)
 {
 	/* Request to remove a partition from a memory domain.
@@ -298,10 +331,16 @@ void _arch_mem_domain_partition_remove(struct k_mem_domain *domain,
 		&domain->partitions[partition_id], &reset_attr);
 }
 
+void _arch_mem_domain_partition_add(struct k_mem_domain *domain,
+				    u32_t partition_id)
+{
+	/* No-op on this architecture */
+}
+
 /*
  * Validate the given buffer is user accessible or not
  */
-int _arch_buffer_validate(void *addr, size_t size, int write)
+int z_arch_buffer_validate(void *addr, size_t size, int write)
 {
 	return arm_core_mpu_buffer_validate(addr, size, write);
 }

@@ -6,10 +6,9 @@
 
 #include <zephyr.h>
 #include <kernel.h>
-#include <soc.h>
 #include "pm_policy.h"
 
-#define LOG_LEVEL CONFIG_PM_LOG_LEVEL /* From power module Kconfig */
+#define LOG_LEVEL CONFIG_SYS_PM_LOG_LEVEL /* From power module Kconfig */
 #include <logging/log.h>
 LOG_MODULE_DECLARE(power);
 
@@ -17,29 +16,33 @@ LOG_MODULE_DECLARE(power);
 
 /* PM Policy based on SoC/Platform residency requirements */
 static const unsigned int pm_min_residency[] = {
-#ifdef CONFIG_SYS_POWER_STATE_CPU_LPS_SUPPORTED
-	CONFIG_PM_LPS_MIN_RES * SECS_TO_TICKS,
+#ifdef CONFIG_SYS_POWER_SLEEP_STATES
+#ifdef CONFIG_HAS_SYS_POWER_STATE_SLEEP_1
+	CONFIG_SYS_PM_MIN_RESIDENCY_SLEEP_1 * SECS_TO_TICKS / MSEC_PER_SEC,
 #endif
 
-#ifdef CONFIG_SYS_POWER_STATE_CPU_LPS_1_SUPPORTED
-	CONFIG_PM_LPS_1_MIN_RES * SECS_TO_TICKS,
+#ifdef CONFIG_HAS_SYS_POWER_STATE_SLEEP_2
+	CONFIG_SYS_PM_MIN_RESIDENCY_SLEEP_2 * SECS_TO_TICKS / MSEC_PER_SEC,
 #endif
 
-#ifdef CONFIG_SYS_POWER_STATE_CPU_LPS_2_SUPPORTED
-	CONFIG_PM_LPS_2_MIN_RES * SECS_TO_TICKS,
+#ifdef CONFIG_HAS_SYS_POWER_STATE_SLEEP_3
+	CONFIG_SYS_PM_MIN_RESIDENCY_SLEEP_3 * SECS_TO_TICKS / MSEC_PER_SEC,
+#endif
+#endif /* CONFIG_SYS_POWER_SLEEP_STATES */
+
+#ifdef CONFIG_SYS_POWER_DEEP_SLEEP_STATES
+#ifdef CONFIG_HAS_SYS_POWER_STATE_DEEP_SLEEP_1
+	CONFIG_SYS_PM_MIN_RESIDENCY_DEEP_SLEEP_1 * SECS_TO_TICKS / MSEC_PER_SEC,
 #endif
 
-#ifdef CONFIG_SYS_POWER_STATE_DEEP_SLEEP_SUPPORTED
-	CONFIG_PM_DEEP_SLEEP_MIN_RES * SECS_TO_TICKS,
+#ifdef CONFIG_HAS_SYS_POWER_STATE_DEEP_SLEEP_2
+	CONFIG_SYS_PM_MIN_RESIDENCY_DEEP_SLEEP_2 * SECS_TO_TICKS / MSEC_PER_SEC,
 #endif
 
-#ifdef CONFIG_SYS_POWER_STATE_DEEP_SLEEP_1_SUPPORTED
-	CONFIG_PM_DEEP_SLEEP_1_MIN_RES * SECS_TO_TICKS,
+#ifdef CONFIG_HAS_SYS_POWER_STATE_DEEP_SLEEP_3
+	CONFIG_SYS_PM_MIN_RESIDENCY_DEEP_SLEEP_3 * SECS_TO_TICKS / MSEC_PER_SEC,
 #endif
-
-#ifdef CONFIG_SYS_POWER_STATE_DEEP_SLEEP_2_SUPPORTED
-	CONFIG_PM_DEEP_SLEEP_2_MIN_RES * SECS_TO_TICKS,
-#endif
+#endif /* CONFIG_SYS_POWER_DEEP_SLEEP_STATES */
 };
 
 enum power_states sys_pm_policy_next_state(s32_t ticks)
@@ -52,7 +55,7 @@ enum power_states sys_pm_policy_next_state(s32_t ticks)
 	}
 
 	for (i = ARRAY_SIZE(pm_min_residency) - 1; i >= 0; i--) {
-#ifdef CONFIG_PM_CONTROL_STATE_LOCK
+#ifdef CONFIG_SYS_PM_STATE_LOCK
 		if (!sys_pm_ctrl_is_state_enabled((enum power_states)(i))) {
 			continue;
 		}

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 set(COMPILER gcc)
 
 set(CROSS_COMPILE_TARGET i586-${TOOLCHAIN_VENDOR}-elf)
@@ -5,3 +7,4 @@ set(SYSROOT_TARGET       i586-${TOOLCHAIN_VENDOR}-elf)
 
 set(CROSS_COMPILE ${TOOLCHAIN_HOME}/usr/bin/${CROSS_COMPILE_TARGET}/${CROSS_COMPILE_TARGET}-)
 set(SYSROOT_DIR ${ZEPHYR_SDK_INSTALL_DIR}/sysroots/${SYSROOT_TARGET}/usr)
+set(TOOLCHAIN_HAS_NEWLIB ON CACHE BOOL "True if toolchain supports newlib")

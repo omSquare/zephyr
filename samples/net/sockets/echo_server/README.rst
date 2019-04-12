@@ -12,12 +12,12 @@ for incoming IPv4 or IPv6 packets (sent by the echo client) and simply sends
 them back.
 
 The source code for this sample application can be found at:
-:file:`samples/net/sockets/echo_server`.
+:zephyr_file:`samples/net/sockets/echo_server`.
 
 Requirements
 ************
 
-- :ref:`networking_with_qemu`
+- :ref:`networking_with_host`
 
 Building and Running
 ********************

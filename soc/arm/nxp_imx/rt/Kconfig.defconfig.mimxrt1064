@@ -11,6 +11,9 @@ config SOC
 	string
 	default "mimxrt1064"
 
+config NUM_IRQS
+	default 160
+
 config ARM_DIV
 	default 1
 
@@ -23,12 +26,11 @@ config IPG_DIV
 config GPIO
 	def_bool y
 
-choice CODE_LOCATION
-	default CODE_ITCM
-endchoice
+if NET_L2_ETHERNET
 
-choice DATA_LOCATION
-	default DATA_DTCM
-endchoice
+config INIT_ENET_PLL
+	def_bool y
+
+endif # NET_L2_ETHERNET
 
 endif # SOC_MIMXRT1064

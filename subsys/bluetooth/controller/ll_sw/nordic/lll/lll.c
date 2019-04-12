@@ -111,7 +111,7 @@ int lll_init(void)
 	event.curr.abort_cb = NULL;
 
 	/* Initialize LF CLK */
-	clk_k32 = device_get_binding(CONFIG_CLOCK_CONTROL_NRF_K32SRC_DRV_NAME);
+	clk_k32 = device_get_binding(DT_NORDIC_NRF_CLOCK_0_LABEL "_32K");
 	if (!clk_k32) {
 		return -ENODEV;
 	}
@@ -120,7 +120,7 @@ int lll_init(void)
 
 	/* Initialize HF CLK */
 	lll.clk_hf =
-		device_get_binding(CONFIG_CLOCK_CONTROL_NRF_M16SRC_DRV_NAME);
+		device_get_binding(DT_NORDIC_NRF_CLOCK_0_LABEL "_16M");
 	if (!lll.clk_hf) {
 		return -ENODEV;
 	}
@@ -326,11 +326,11 @@ u32_t lll_evt_offset_get(struct evt_hdr *evt)
 	if (0) {
 #if defined(CONFIG_BT_CTLR_XTAL_ADVANCED)
 	} else if (evt->ticks_xtal_to_start & XON_BITMASK) {
-		return max(evt->ticks_active_to_start,
+		return MAX(evt->ticks_active_to_start,
 			   evt->ticks_preempt_to_start);
 #endif /* CONFIG_BT_CTLR_XTAL_ADVANCED */
 	} else {
-		return max(evt->ticks_active_to_start,
+		return MAX(evt->ticks_active_to_start,
 			   evt->ticks_xtal_to_start);
 	}
 }
@@ -391,7 +391,7 @@ static int prepare(lll_is_abort_cb_t is_abort_cb, lll_abort_cb_t abort_cb,
 		/* Calc the preempt timeout */
 		evt = HDR_LLL2EVT(prepare_param->param);
 		preempt_anchor = prepare_param->ticks_at_expire;
-		preempt_to = max(evt->ticks_active_to_start,
+		preempt_to = MAX(evt->ticks_active_to_start,
 				 evt->ticks_xtal_to_start) -
 				 evt->ticks_preempt_to_start;
 

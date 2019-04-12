@@ -99,17 +99,6 @@ static sys_slist_t timestamp_callbacks;
 #endif /* CONFIG_NET_PKT_TIMESTAMP */
 
 #if CONFIG_NET_IF_LOG_LEVEL >= LOG_LEVEL_DBG
-#if defined(CONFIG_NET_STATISTICS)
-#define debug_check_packet(pkt)						\
-	do {								\
-		NET_DBG("Processing (pkt %p, data len %d, "		\
-			"prio %d) network packet",			\
-			pkt, pkt->total_pkt_len,			\
-			net_pkt_priority(pkt));				\
-									\
-		NET_ASSERT(pkt->frags && pkt->total_pkt_len);		\
-	} while (0)
-#else /* CONFIG_NET_STATISTICS */
 #define debug_check_packet(pkt)						\
 	do {								\
 		NET_DBG("Processing (pkt %p, prio %d) network packet",	\
@@ -117,20 +106,19 @@ static sys_slist_t timestamp_callbacks;
 									\
 		NET_ASSERT(pkt->frags);					\
 	} while (0)
-#endif /* CONFIG_NET_STATISTICS */
 #else
 #define debug_check_packet(...)
 #endif /* CONFIG_NET_IF_LOG_LEVEL >= LOG_LEVEL_DBG */
 
 static inline void net_context_send_cb(struct net_context *context,
-				       void *token, int status)
+				       int status)
 {
 	if (!context) {
 		return;
 	}
 
 	if (context->send_cb) {
-		context->send_cb(context, status, token, context->user_data);
+		context->send_cb(context, status, context->user_data);
 	}
 
 #if defined(CONFIG_NET_UDP)
@@ -151,7 +139,6 @@ static bool net_if_tx(struct net_if *iface, struct net_pkt *pkt)
 {
 	struct net_linkaddr *dst;
 	struct net_context *context;
-	void *context_token;
 	int status;
 
 	if (!pkt) {
@@ -162,7 +149,6 @@ static bool net_if_tx(struct net_if *iface, struct net_pkt *pkt)
 
 	dst = net_pkt_lladdr_dst(pkt);
 	context = net_pkt_context(pkt);
-	context_token = net_pkt_token(pkt);
 
 	if (atomic_test_bit(iface->if_dev->flags, NET_IF_UP)) {
 		if (IS_ENABLED(CONFIG_NET_TCP) &&
@@ -179,21 +165,16 @@ static bool net_if_tx(struct net_if *iface, struct net_pkt *pkt)
 	}
 
 	if (status < 0) {
-		if (IS_ENABLED(CONFIG_NET_TCP)
-		    && net_pkt_family(pkt) != AF_UNSPEC) {
-			net_pkt_set_sent(pkt, false);
-		}
-
 		net_pkt_unref(pkt);
 	} else {
 		net_stats_update_bytes_sent(iface, status);
 	}
 
 	if (context) {
-		NET_DBG("Calling context send cb %p token %p status %d",
-			context, context_token, status);
+		NET_DBG("Calling context send cb %p status %d",
+			context, status);
 
-		net_context_send_cb(context, context_token, status);
+		net_context_send_cb(context, status);
 	}
 
 	if (dst->addr) {
@@ -220,10 +201,8 @@ void net_if_queue_tx(struct net_if *iface, struct net_pkt *pkt)
 	k_work_init(net_pkt_work(pkt), process_tx_packet);
 
 #if defined(CONFIG_NET_STATISTICS)
-	pkt->total_pkt_len = net_pkt_get_len(pkt);
-
 	net_stats_update_tc_sent_pkt(iface, tc);
-	net_stats_update_tc_sent_bytes(iface, tc, pkt->total_pkt_len);
+	net_stats_update_tc_sent_bytes(iface, tc, net_pkt_get_len(pkt));
 	net_stats_update_tc_sent_priority(iface, tc, prio);
 #endif
 
@@ -250,7 +229,6 @@ enum net_verdict net_if_send_data(struct net_if *iface, struct net_pkt *pkt)
 	struct net_context *context = net_pkt_context(pkt);
 	struct net_linkaddr *dst = net_pkt_lladdr_dst(pkt);
 	enum net_verdict verdict = NET_OK;
-	void *token = net_pkt_token(pkt);
 	int status = -EIO;
 
 	if (!atomic_test_bit(iface->if_dev->flags, NET_IF_UP)) {
@@ -304,9 +282,9 @@ done:
 	 */
 	if (verdict == NET_DROP) {
 		if (context) {
-			NET_DBG("Calling ctx send cb %p token %p verdict %d",
-				context, token, verdict);
-			net_context_send_cb(context, token, status);
+			NET_DBG("Calling ctx send cb %p verdict %d",
+				context, verdict);
+			net_context_send_cb(context, status);
 		}
 
 		if (dst->addr) {
@@ -405,7 +383,7 @@ static u8_t get_ipaddr_diff(const u8_t *src, const u8_t *dst, int addr_len)
 
 	for (j = 0U; j < addr_len; j++) {
 		if (src[j] == dst[j]) {
-			len += 8;
+			len += 8U;
 		} else {
 			xor = src[j] ^ dst[j];
 			for (k = 0U; k < 8; k++) {
@@ -579,7 +557,7 @@ static void net_if_ipv6_start_dad(struct net_if *iface,
 			log_strdup(net_sprint_ipv6_addr(
 					   &ifaddr->address.in6_addr)));
 
-		ifaddr->dad_count = 1;
+		ifaddr->dad_count = 1U;
 
 		if (!net_ipv6_start_dad(iface, ifaddr)) {
 			k_delayed_work_submit(&ifaddr->dad_timer, DAD_TIMEOUT);
@@ -2759,6 +2737,11 @@ enum net_verdict net_if_recv_data(struct net_if *iface, struct net_pkt *pkt)
 			new_pkt = net_pkt_ref(pkt);
 		}
 
+		/* L2 has modified the buffer starting point, it is easier
+		 * to re-initialize the cursor rather than updating it.
+		 */
+		net_pkt_cursor_init(new_pkt);
+
 		if (net_promisc_mode_input(new_pkt) == NET_DROP) {
 			net_pkt_unref(new_pkt);
 		}
@@ -2818,21 +2801,27 @@ bool net_if_need_calc_rx_checksum(struct net_if *iface)
 	return need_calc_checksum(iface, ETHERNET_HW_RX_CHKSUM_OFFLOAD);
 }
 
-struct net_if *net_if_get_by_index(u8_t index)
+struct net_if *net_if_get_by_index(int index)
 {
-	if (&__net_if_start[index] >= __net_if_end) {
+	if (index <= 0) {
+		return NULL;
+	}
+
+	if (&__net_if_start[index - 1] >= __net_if_end) {
 		NET_DBG("Index %d is too large", index);
 		return NULL;
 	}
 
-	return &__net_if_start[index];
+	return &__net_if_start[index - 1];
 }
 
-u8_t net_if_get_by_iface(struct net_if *iface)
+int net_if_get_by_iface(struct net_if *iface)
 {
-	NET_ASSERT(iface >= __net_if_start && iface < __net_if_end);
+	if (!(iface >= __net_if_start && iface < __net_if_end)) {
+		return -1;
+	}
 
-	return iface - __net_if_start;
+	return (iface - __net_if_start) + 1;
 }
 
 void net_if_foreach(net_if_cb_t cb, void *user_data)
