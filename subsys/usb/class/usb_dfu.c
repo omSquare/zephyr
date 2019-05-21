@@ -300,6 +300,7 @@ struct dfu_data_t {
 	enum dfu_state state;              /* State of the DFU device */
 	enum dfu_status status;            /* Status of the DFU device */
 	u16_t block_nr;                 /* DFU block number */
+	u16_t bwPollTimeout;
 };
 
 static struct dfu_data_t dfu_data = {
@@ -307,6 +308,7 @@ static struct dfu_data_t dfu_data = {
 	.status = statusOK,
 	.flash_area_id = DT_FLASH_AREA_IMAGE_1_ID,
 	.alt_setting = 0,
+	.bwPollTimeout = CONFIG_USB_DFU_DEFAULT_POLLTIMEOUT,
 };
 
 /**
@@ -392,11 +394,14 @@ static int dfu_class_handle_req(struct usb_setup_packet *pSetup,
 			dfu_data.state = dfuIDLE;
 		}
 
+		/* bStatus */
 		(*data)[0] = dfu_data.status;
-		(*data)[1] = 0U;
-		(*data)[2] = 1U;
+		/* bwPollTimeout */
+		sys_put_le16(dfu_data.bwPollTimeout, &(*data)[1]);
 		(*data)[3] = 0U;
+		/* bState */
 		(*data)[4] = dfu_data.state;
+		/* iString */
 		(*data)[5] = 0U;
 		*data_len = 6;
 		break;
@@ -734,11 +739,17 @@ static void dfu_work_handler(struct k_work *item)
 
 	switch (dfu_data_worker.worker_state) {
 	case dfuIDLE:
+/*
+ * If progressive erase is enabled, then erase take place while
+ * image collection, so not erase whole bank at DFU beginning
+ */
+#ifndef CONFIG_IMG_ERASE_PROGRESSIVELY
 		if (boot_erase_img_bank(DT_FLASH_AREA_IMAGE_1_ID)) {
 			dfu_data.state = dfuERROR;
 			dfu_data.status = errERASE;
 			break;
 		}
+#endif
 	case dfuDNLOAD_IDLE:
 		dfu_flash_write(dfu_data_worker.buf,
 				dfu_data_worker.worker_len);

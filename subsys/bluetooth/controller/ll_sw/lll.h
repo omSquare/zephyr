@@ -175,6 +175,17 @@ enum node_rx_type {
 #endif /* CONFIG_BT_HCI_MESH_EXT */
 };
 
+
+/* Footer of node_rx_hdr */
+struct node_rx_ftr {
+	void  *param;
+	void  *extra;
+	u32_t ticks_anchor;
+	u32_t us_radio_end;
+	u32_t us_radio_rdy;
+};
+
+
 /* Header of node_rx_pdu */
 struct node_rx_hdr {
 	union {
@@ -185,26 +196,13 @@ struct node_rx_hdr {
 
 	enum node_rx_type   type;
 	u16_t               handle;
-};
 
-/* Footer of node_rx_pdu.
- * TODO: Eliminate footer (move contents to header) to avoid pointer arithmetic
- */
-struct node_rx_ftr {
-	void  *param;
-	void  *extra;
-	u32_t ticks_anchor;
-	u32_t us_radio_end;
-	u32_t us_radio_rdy;
+	struct node_rx_ftr  rx_ftr;
 };
 
 struct node_rx_pdu {
 	struct node_rx_hdr hdr;
 	u8_t               pdu[0];
-	/*
-	 * Footer follows here, but can not be part of this struct due to
-	 * flexible pdu member. Footer obtained by pointer arithmetic
-	 */
 };
 
 enum {
@@ -271,6 +269,7 @@ int lll_prepare(lll_is_abort_cb_t is_abort_cb, lll_abort_cb_t abort_cb,
 		struct lll_prepare_param *prepare_param);
 void lll_resume(void *param);
 void lll_disable(void *param);
+u32_t lll_radio_is_idle(void);
 
 int ull_prepare_enqueue(lll_is_abort_cb_t is_abort_cb,
 			       lll_abort_cb_t abort_cb,

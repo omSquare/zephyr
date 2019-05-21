@@ -557,6 +557,13 @@ static int hf_clock_enable(bool on, bool blocking)
 			return 0;
 		}
 		ret = clock_control_off(clock, (void *)blocking);
+		if (ret == -EBUSY) {
+			/* This is an expected behaviour.
+			 * -EBUSY means that some other module has also
+			 * requested the clock to run.
+			 */
+			ret = 0;
+		}
 	}
 
 	if (ret && (blocking || (ret != -EINPROGRESS))) {
@@ -1819,10 +1826,9 @@ int usb_dc_ep_set_callback(const u8_t ep, const usb_dc_ep_callback cb)
 	return 0;
 }
 
-int usb_dc_set_status_callback(const usb_dc_status_callback cb)
+void usb_dc_set_status_callback(const usb_dc_status_callback cb)
 {
 	get_usbd_ctx()->status_cb = cb;
-	return 0;
 }
 
 int usb_dc_ep_mps(const u8_t ep)

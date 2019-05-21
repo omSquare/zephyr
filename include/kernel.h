@@ -514,8 +514,6 @@ struct k_thread {
 	struct _thread_base base;
 
 	/** defined by the architecture, but all archs need these */
-	struct _caller_saved caller_saved;
-	/** defined by the architecture, but all archs need these */
 	struct _callee_saved callee_saved;
 
 	/** static thread init data */
@@ -4430,6 +4428,10 @@ __syscall void k_poll_signal_check(struct k_poll_signal *signal,
  * k_poll_signal_reset(). It thus has to be reset by the user before being
  * passed again to k_poll() or k_poll() will consider it being signaled, and
  * will return immediately.
+ *
+ * @note The result is stored and the 'signaled' field is set even if
+ * this function returns an error indicating that an expiring poll was
+ * not notified.  The next k_poll() will detect the missed raise.
  *
  * @param signal A poll signal.
  * @param result The value to store in the result field of the signal.
