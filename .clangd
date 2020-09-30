@@ -1,0 +1,11 @@
+CompileFlags:
+    Remove: 
+        - -fno-reorder-functions 
+        - -fstack-usage
+        - -fno-freestanding
+---
+If:
+    PathMatch: .*\.h
+CompileFlags:
+    Remove: 
+        - -Wall
