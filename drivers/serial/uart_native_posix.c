@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include <drivers/uart.h>
 #include "cmdline.h" /* native_posix command line options header */
@@ -46,6 +47,7 @@ static void np_uart_poll_out(const struct device *dev,
 				      unsigned char out_char);
 
 static bool auto_attach;
+static bool wait_pts;
 static const char default_cmd[] = CONFIG_NATIVE_UART_AUTOATTACH_DEFAULT_CMD;
 static char *auto_attach_cmd;
 
@@ -184,6 +186,9 @@ static int open_tty(struct native_uart_status *driver_data,
 	posix_print_trace("%s connected to pseudotty: %s\n",
 			  uart_name, slave_pty_name);
 
+	if(wait_pts) {
+		close(open(slave_pty_name, O_RDWR | O_NOCTTY));
+	}
 	if (do_auto_attach) {
 		attach_to_tty(slave_pty_name);
 	}
@@ -261,9 +266,20 @@ static void np_uart_poll_out(const struct device *dev,
 				      unsigned char out_char)
 {
 	int ret;
-	struct native_uart_status *d;
+	struct native_uart_status *d = (struct native_uart_status *)dev->data;
+	struct pollfd pfd = { .fd = d->out_fd, .events = POLLHUP };
 
-	d = (struct native_uart_status *)dev->data;
+	if(wait_pts) {
+		while(1) {
+			poll(&pfd, 1, 0);
+			if(!(pfd.revents & POLLHUP)) {
+				/* There is now a reader on the slave side */
+				break;
+			}
+			k_sleep(K_MSEC(100));
+		};
+	}
+    
 	ret = write(d->out_fd, &out_char, 1);
 
 	if (ret != 1) {
@@ -375,11 +391,16 @@ static void np_add_uart_options(void)
 		(void *)&auto_attach, NULL,
 		"Automatically attach to the UART terminal"},
 		{false, false, false,
-		"attach_uart_cmd", "\"cmd\"", 's',
+		"attach_uart_cmd", "\"cmd\"", 's',		
 		(void *)&auto_attach_cmd, NULL,
 		"Command used to automatically attach to the terminal, by "
 		"default: '" CONFIG_NATIVE_UART_AUTOATTACH_DEFAULT_CMD "'"},
-
+		IF_ENABLED(CONFIG_UART_NATIVE_PTS_READY, (
+			{false, false, true,
+			"pts-wait", "", 'b',
+			(void *)&wait_pts, NULL,
+			"Wait to pts until become ready"},) 
+		)
 		ARG_TABLE_ENDMARKER
 	};
 

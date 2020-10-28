@@ -39,6 +39,13 @@ config NATIVE_UART_0_ON_STDINOUT
 
 endchoice
 
+config UART_NATIVE_PTS_READY
+	bool "Support pause writing until pts is attached"
+	depends on NATIVE_UART_0_ON_OWN_PTY || UART_NATIVE_POSIX_PORT_1_ENABLE
+	help
+	  This option ensures that writing to pty waits until slave side of 
+	  pseudo terminal is become ready to receive data.
+
 config UART_NATIVE_POSIX_PORT_1_ENABLE
 	bool "Enable second UART port"
 	help
